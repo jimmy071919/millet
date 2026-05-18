@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.7.2 — 2026-05-17
+
+### Fixes
+
+- **`meet download <lang>` no longer fails with
+  `CERTIFICATE_VERIFY_FAILED` on python.org Python builds (macOS)**
+  (reported by @patternn in the M8 retrospective). `torchaudio`'s
+  alignment-model fetcher uses raw `urllib`, which inherits the
+  interpreter's default SSL context — empty on python.org Python
+  installs that ship without a CA bundle. `meet/__init__.py` now
+  injects `certifi`'s CA bundle as `SSL_CERT_FILE` at package
+  import time (only if not already set), so every `urllib` caller
+  in the process picks up a working store. HuggingFace downloads
+  were never affected (they use `requests` + `certifi` directly).
+
+### Internals
+
+- `certifi` is now listed explicitly in `dependencies` (it was
+  already a transitive dep via `requests`).
+
 ## v0.7.1 — 2026-05-14
 
 ### Fixes
