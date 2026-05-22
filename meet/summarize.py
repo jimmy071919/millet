@@ -33,7 +33,7 @@ import requests
 # ─── Constants ──────────────────────────────────────────────────────────────
 
 # Ollama defaults
-DEFAULT_OLLAMA_MODEL = "gpt-oss:20b"
+DEFAULT_OLLAMA_MODEL = "qwen3.5:9b"
 OLLAMA_BASE_URL = "http://localhost:11434"
 DEFAULT_TIMEOUT = 600  # 10 minutes max
 
@@ -49,12 +49,40 @@ CLAUDEMAX_HEALTH_URL = "http://localhost:3457/health"
 # OpenAI-compatible generic endpoint defaults
 DEFAULT_OPENAI_COMPAT_MODEL = "gpt-4o-mini"
 
-# Supported backends
-BACKENDS = ("ollama", "openrouter", "claudemax", "openai")
+# Tinfoil TEE defaults (hardware-enforced prompt privacy)
+DEFAULT_TINFOIL_MODEL = "deepseek-v4-pro"
+TINFOIL_API_KEY_ENV = "TINFOIL_API_KEY"
+_TINFOIL_KEY_FILE = Path.home() / "models" / "tinfoil" / "tinfoil.txt"
 
-# Fallback order: try claudemax first, then openrouter, then ollama
+
+def _resolve_tinfoil_api_key() -> str | None:
+    """Resolve Tinfoil API key from env var or standard key file."""
+    key = os.environ.get(TINFOIL_API_KEY_ENV)
+    if key:
+        return key.strip()
+    if _TINFOIL_KEY_FILE.exists():
+        try:
+            return _TINFOIL_KEY_FILE.read_text().strip()
+        except OSError:
+            pass
+    return None
+
+# Supported backends
+BACKENDS = ("ollama", "openrouter", "claudemax", "openai", "tinfoil")
+
+# Fallback order: try claudemax first, then tinfoil, openrouter, then ollama
 # (openai is not in fallback — it's opt-in only via explicit config)
-FALLBACK_ORDER = ("claudemax", "openrouter", "ollama")
+FALLBACK_ORDER = ("claudemax", "tinfoil", "openrouter", "ollama")
+
+# ─── Summarization presets ──────────────────────────────────────────────────
+# Friendly names that map to backend+model pairs for the GUI/CLI dropdown.
+
+SUMMARY_PRESETS = {
+    "high-quality": {"backend": "claudemax", "model": "claude-sonnet-4-6"},
+    "confidential": {"backend": "tinfoil",  "model": "deepseek-v4-pro"},
+    "alternative":  {"backend": "openrouter", "model": "moonshotai/kimi-k2.6"},
+}
+DEFAULT_PRESET = "high-quality"
 
 # Backward-compatible aliases (referenced by translate command, etc.)
 DEFAULT_MODEL = DEFAULT_OLLAMA_MODEL
@@ -281,6 +309,8 @@ def _resolve_model(backend: str) -> str:
         return DEFAULT_CLAUDEMAX_MODEL
     if backend == "openai":
         return DEFAULT_OPENAI_COMPAT_MODEL
+    if backend == "tinfoil":
+        return DEFAULT_TINFOIL_MODEL
     return DEFAULT_OLLAMA_MODEL
 
 
@@ -304,6 +334,7 @@ class SummaryConfig:
 
     backend: str | None = None   # None = resolve from env/default
     model: str | None = None     # None = resolve from env/default per backend
+    preset: str | None = None    # None = no preset; "high-quality"|"confidential"|"alternative"
     ollama_url: str = OLLAMA_BASE_URL
     timeout: int = DEFAULT_TIMEOUT
     temperature: float = 0.3
@@ -311,6 +342,19 @@ class SummaryConfig:
     ollama_singlepass: bool | None = None  # None = resolve from env (default: two-pass)
 
     def __post_init__(self):
+        # Resolve preset: explicit arg > env var > None
+        if self.preset is None:
+            self.preset = os.environ.get("MEETSCRIBE_SUMMARY_PRESET")
+        if self.preset:
+            self.preset = self.preset.lower().strip()
+            if self.preset in SUMMARY_PRESETS:
+                p = SUMMARY_PRESETS[self.preset]
+                # Preset sets backend/model only if not explicitly provided
+                if self.backend is None:
+                    self.backend = p["backend"]
+                if self.model is None:
+                    self.model = p["model"]
+
         # Resolve backend: explicit arg > env var > "ollama"
         if self.backend is None:
             self.backend = _resolve_backend()
@@ -479,6 +523,8 @@ def is_backend_available(config: SummaryConfig | None = None) -> bool:
         return is_claudemax_available()
     elif config.backend == "openrouter":
         return bool(os.environ.get("OPENROUTER_API_KEY"))
+    elif config.backend == "tinfoil":
+        return bool(_resolve_tinfoil_api_key())
     elif config.backend == "openai":
         return bool(os.environ.get("MEETSCRIBE_OPENAI_BASE_URL"))
     else:
@@ -496,6 +542,11 @@ def _backend_not_available_message(config: SummaryConfig) -> str:
         return (
             "OPENROUTER_API_KEY is not set. "
             "Export it or use --summary-backend ollama."
+        )
+    if config.backend == "tinfoil":
+        return (
+            f"TINFOIL_API_KEY is not set and key file {_TINFOIL_KEY_FILE} "
+            "not found. Get an API key at https://tinfoil.sh"
         )
     if config.backend == "openai":
         return (
@@ -706,6 +757,12 @@ def _summarize_openrouter(
 
     t0 = time.time()
 
+    # Kimi K2.6 burns all output tokens on hidden reasoning if not disabled,
+    # producing empty visible content.  Disable reasoning for known models.
+    extra_kwargs: dict = {}
+    if "kimi" in config.model.lower():
+        extra_kwargs["extra_body"] = {"reasoning": {"enabled": False}}
+
     try:
         response = client.chat.completions.create(
             model=config.model,
@@ -715,6 +772,7 @@ def _summarize_openrouter(
             ],
             temperature=config.temperature,
             timeout=config.timeout,
+            **extra_kwargs,
         )
     except Exception as e:
         raise RuntimeError(f"OpenRouter API error: {e}")
@@ -735,6 +793,62 @@ def _summarize_openrouter(
         model=display_model,
         elapsed_seconds=elapsed,
         backend="openrouter",
+    )
+
+
+# ─── Tinfoil TEE backend ──────────────────────────────────────────────────
+
+def _summarize_tinfoil(
+    system_prompt: str,
+    user_prompt: str,
+    config: SummaryConfig,
+) -> MeetingSummary:
+    """Send a summarization request to Tinfoil TEE (hardware-private inference).
+
+    Prompts are encrypted into the secure enclave and processed inside
+    NVIDIA H100 Confidential Computing.  The provider cannot see the data.
+    """
+    import time
+
+    api_key = _resolve_tinfoil_api_key()
+    if not api_key:
+        raise RuntimeError(
+            f"{TINFOIL_API_KEY_ENV} environment variable is not set and "
+            f"key file {_TINFOIL_KEY_FILE} not found. "
+            "Get an API key at https://tinfoil.sh"
+        )
+
+    from tinfoil import TinfoilAI
+
+    client = TinfoilAI(api_key=api_key)
+
+    t0 = time.time()
+
+    try:
+        response = client.chat.completions.create(
+            model=config.model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=config.temperature,
+        )
+    except Exception as e:
+        raise RuntimeError(f"Tinfoil TEE API error: {e}")
+
+    elapsed = time.time() - t0
+    content = (response.choices[0].message.content or "").strip()
+
+    if not content:
+        raise RuntimeError(
+            f"Tinfoil returned an empty response for model '{config.model}'."
+        )
+
+    return MeetingSummary(
+        markdown=content,
+        model=f"{config.model} (TEE)",
+        elapsed_seconds=elapsed,
+        backend="tinfoil",
     )
 
 
@@ -925,6 +1039,8 @@ def _dispatch(
         result = _summarize_claudemax(system_prompt, user_prompt, fallback_config)
     elif backend == "openrouter":
         result = _summarize_openrouter(system_prompt, user_prompt, fallback_config)
+    elif backend == "tinfoil":
+        result = _summarize_tinfoil(system_prompt, user_prompt, fallback_config)
     elif backend == "openai":
         result = _summarize_openai(system_prompt, user_prompt, fallback_config)
     else:
@@ -1002,6 +1118,22 @@ def summarize(
     else:
         user_prompt = USER_PROMPT_TEMPLATE.format(transcript=transcript_text)
 
+    # When a preset was explicitly selected (e.g. "confidential"), the user
+    # chose a specific privacy/quality level.  Silently falling back to a
+    # different backend would violate that expectation — especially for the
+    # "confidential" preset where falling back to a trust-based provider
+    # defeats the purpose.  Fail loudly instead.
+    if config.preset and config.preset in SUMMARY_PRESETS:
+        avail_config = SummaryConfig(backend=config.backend)
+        if not is_backend_available(avail_config):
+            msg = _backend_not_available_message(avail_config)
+            preset_label = config.preset
+            raise RuntimeError(
+                f"Summarization preset '{preset_label}' requires the "
+                f"'{config.backend}' backend, but it is unavailable: {msg}\n"
+                f"Set the required environment variable and try again."
+            )
+
     # Build the list of backends to try: configured first, then fallback order
     backends_to_try = [config.backend]
     for fb in FALLBACK_ORDER:
@@ -1039,6 +1171,11 @@ def summarize(
         except Exception as exc:
             last_error = exc
             _log(f"{backend} failed: {exc}")
+            # When a preset was explicitly selected, do NOT silently fall
+            # back to a different backend — the user chose a specific
+            # privacy/quality level.  Re-raise so the failure is visible.
+            if config.preset and config.preset in SUMMARY_PRESETS and backend == config.backend:
+                raise
             continue
 
     # All backends failed
