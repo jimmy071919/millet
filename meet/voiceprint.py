@@ -24,6 +24,9 @@ PROFILES_PATH = Path.home() / ".config" / "meet" / "speaker_profiles.json"
 MATCH_THRESHOLD = 0.65  # cosine similarity — below this, don't auto-label
 MIN_SEGMENT_DURATION = 1.5   # seconds — skip very short segments for embedding
 MAX_SEGMENTS_PER_SPEAKER = 10  # how many segments to average per speaker
+MIN_SEGMENT_RMS = 0.005  # normalized float32 RMS — segments quieter than this are
+                         # treated as silence and skipped for embedding extraction.
+                         # Prevents garbage embeddings from near-silent mic channels.
 
 
 # ─── Embedding model loading ──────────────────────────────────────────────────
@@ -206,6 +209,16 @@ def _embed_segments(
 
         if len(clip) < int(sample_rate * MIN_SEGMENT_DURATION):
             continue  # too short
+
+        # Skip near-silent clips — the embedding model produces garbage
+        # vectors from silence, which poison matching and profile updates.
+        rms = float(np.sqrt(np.mean(clip ** 2)))
+        if rms < MIN_SEGMENT_RMS:
+            log.debug(
+                "Skipping near-silent segment %.1f-%.1f (rms=%.6f)",
+                start, end, rms,
+            )
+            continue
 
         try:
             # Pass the clip directly as a torch tensor — pyannote Inference
@@ -452,6 +465,18 @@ def identify_speakers(
             continue
 
         samples, sr = channel_data
+
+        # Warn when the whole channel is near-silent — individual segment
+        # checks in _embed_segments handle fine-grained rejection, but a
+        # channel-level check gives a more informative diagnostic.
+        channel_rms = float(np.sqrt(np.mean(samples ** 2)))
+        if channel_rms < MIN_SEGMENT_RMS:
+            log.warning(
+                "Channel '%s' for speaker %s has very low energy "
+                "(rms=%.6f) — embedding quality may be poor",
+                channel, speaker_id, channel_rms,
+            )
+
         emb = _embed_segments(samples, sr, selected, inference)
         if emb is not None:
             new_embeddings[speaker_id] = emb
@@ -540,6 +565,17 @@ def update_profiles_from_confirmed_labels(
             continue
 
         samples, sr = channel_data
+
+        # Skip profile update when channel audio is near-silent — the
+        # resulting embedding would be meaningless and pollute the profile.
+        channel_rms = float(np.sqrt(np.mean(samples ** 2)))
+        if channel_rms < MIN_SEGMENT_RMS:
+            log.warning(
+                "Skipping profile update for '%s' — channel '%s' is near-silent (rms=%.6f)",
+                name, channel, channel_rms,
+            )
+            continue
+
         emb = _embed_segments(samples, sr, selected, inference)
         if emb is None:
             continue

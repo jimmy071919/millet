@@ -122,21 +122,37 @@ def _detect_speaker_channels(
     """Determine which audio channel each speaker is dominant on.
 
     Returns a dict mapping speaker ID -> 'mic' or 'system'.
-    Uses the same RMS energy analysis as the channel labeling logic.
+    Uses the same RMS energy + margin analysis as
+    ``_label_speakers_from_channels`` in transcribe.py so that the
+    channel picked here matches the one used to assign the speaker
+    label at transcription time.
     """
     stereo = read_stereo_channels(wav_path)
     if stereo is None:
-        # Mono, unsupported, or unreadable — default all to 'mic'
         return {sp.id: "mic" for sp in speakers}
 
     mic_ratio = compute_speaker_channel_energy(
         stereo.mic, stereo.system, segments, stereo.sample_rate
     )
 
+    if not mic_ratio:
+        return {sp.id: "mic" for sp in speakers}
+
+    best_speaker = max(mic_ratio, key=lambda s: mic_ratio[s])
+    best_ratio = mic_ratio[best_speaker]
+    other_ratios = [r for s, r in mic_ratio.items() if s != best_speaker]
+    avg_other = sum(other_ratios) / len(other_ratios) if other_ratios else 0.0
+    margin = best_ratio - avg_other
+
     channel_map: dict[str, str] = {}
     for sp in speakers:
         ratio = mic_ratio.get(sp.id, 0.5)
-        channel_map[sp.id] = "mic" if ratio > 0.5 else "system"
+        if ratio > 0.5:
+            channel_map[sp.id] = "mic"
+        elif sp.id == best_speaker and margin > 0.1 and best_ratio > 0.15:
+            channel_map[sp.id] = "mic"
+        else:
+            channel_map[sp.id] = "system"
     return channel_map
 
 
@@ -266,6 +282,18 @@ def extract_speaker_clip(
 
     if len(clip) == 0:
         raise RuntimeError(f"Empty audio clip for speaker {speaker_info.id}")
+
+    # Normalize volume so quiet mic channels are audible during playback.
+    # Target peak at ~70 % of full-scale for the sample width.
+    peak = int(np.max(np.abs(clip)))
+    if peak > 0:
+        max_val = (1 << (sampwidth * 8 - 1)) - 1  # 32767 for int16
+        target_peak = int(0.7 * max_val)
+        if peak < target_peak:
+            scale = target_peak / peak
+            clip = np.clip(
+                clip.astype(np.float64) * scale, -max_val, max_val,
+            ).astype(clip.dtype)
 
     # Write to temp file
     tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
@@ -442,10 +470,25 @@ def apply_labels(
         files["summary"].write_text(new_text, encoding="utf-8")
         result_files["summary"] = files["summary"]
 
-        # Load body-only summary for PDF embedding
+        # Load body-only summary for PDF embedding.
+        # Read the original summary meta to preserve model name and backend
+        # (needed for CONFIDENTIAL watermark on TEE-backed summaries).
         from meet.summarize import MeetingSummary
+        orig_model = "(relabeled)"
+        orig_backend = ""
+        orig_elapsed = 0.0
+        meta_path = session_dir / f"{basename}.summary.meta.json"
+        if meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                orig_model = meta.get("model", orig_model)
+                orig_backend = meta.get("backend", orig_backend)
+                orig_elapsed = meta.get("elapsed_seconds", orig_elapsed)
+            except Exception:
+                pass
         summary_result = MeetingSummary(
-            markdown=body, model="(relabeled)", elapsed_seconds=0,
+            markdown=body, model=orig_model, elapsed_seconds=orig_elapsed,
+            backend=orig_backend,
         )
 
     # ── PDF ──

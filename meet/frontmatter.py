@@ -32,7 +32,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -404,6 +404,10 @@ def _yaml_scalar(value: Any) -> str:
         return "false"
     if isinstance(value, (int, float)):
         return str(value)
+    if isinstance(value, datetime):
+        return _yaml_quote(value.isoformat())
+    if isinstance(value, date):
+        return _yaml_quote(value.isoformat())
     if isinstance(value, str):
         # Quote if it contains structural characters or could be misread as
         # a non-string.  Always quote empty strings.
@@ -740,7 +744,11 @@ def write_frontmatter_sidecar(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     path = output_dir / f"{basename}.frontmatter.json"
-    path.write_text(json.dumps(fm, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    def _json_default(o):
+        if isinstance(o, (date, datetime)):
+            return o.isoformat()
+        raise TypeError(f"Object of type {type(o).__name__} is not JSON serializable")
+    path.write_text(json.dumps(fm, indent=2, ensure_ascii=False, default=_json_default) + "\n", encoding="utf-8")
     return path
 
 
