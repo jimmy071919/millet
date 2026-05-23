@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.8.2 — 2026-05-23
+
+### Fixed
+
+- **Voiceprint profile path was frozen at module-import time.**
+  `PROFILES_PATH = Path.home() / ".config/meet/speaker_profiles.json"`
+  was computed once at `import meet.voiceprint` time.  When an embedder
+  (such as vezir) overrode `$HOME` after import and called voiceprint
+  functions in-process, reads and writes went to the original home
+  directory instead of the overridden one.  This caused the central
+  voiceprint DB to go stale while a shadow copy at the real `$HOME`
+  accumulated updates silently.
+
+### Changed
+
+- **All public voiceprint functions accept an optional `profiles_path`
+  keyword argument**: `load_profiles()`, `save_profiles()`,
+  `identify_speakers()`, `update_profiles_from_confirmed_labels()`,
+  `enroll_session()`.  When `None` (the default), the path is resolved
+  at **call time** (not import time) via `_default_profiles_path()`.
+  Existing callers are unaffected — the default behavior matches 0.8.1.
+
+- **New `MEET_PROFILES_PATH` environment variable** overrides the
+  default profile path.  Useful for shell users or service managers
+  that want a non-default location without modifying code.
+
+- **`PROFILES_PATH` module constant** is now a lazy attribute via
+  PEP 562 `__getattr__`.  `from meet.voiceprint import PROFILES_PATH`
+  still works and resolves at access time (respecting current `$HOME`
+  and `$MEET_PROFILES_PATH`).
+
 ## v0.8.1 — 2026-05-22
 
 ### Fixes

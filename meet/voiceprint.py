@@ -4,13 +4,19 @@ Extracts speaker embeddings from labeled sessions using pyannote's bundled
 WeSpeakerResNet34 model, stores averaged profiles per person, and identifies
 speakers in new meetings by cosine similarity.
 
-Profile database lives at ~/.config/meet/speaker_profiles.json.
+Default profile DB: ``~/.config/meet/speaker_profiles.json``.
+
+Override with:
+  - Pass ``profiles_path=`` to any public function (recommended for
+    embedders like vezir that manage their own central DB).
+  - Set ``MEET_PROFILES_PATH=/path/to/profiles.json`` in the environment.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import NamedTuple
 
@@ -18,9 +24,39 @@ import numpy as np
 
 log = logging.getLogger(__name__)
 
-# ─── Constants ────────────────────────────────────────────────────────────────
 
-PROFILES_PATH = Path.home() / ".config" / "meet" / "speaker_profiles.json"
+# ─── Profile path resolution ─────────────────────────────────────────────────
+
+_DEFAULT_PROFILES_REL = Path(".config") / "meet" / "speaker_profiles.json"
+
+
+def _default_profiles_path() -> Path:
+    """Resolve the default profile DB path **at call time**.
+
+    Resolution order:
+      1. ``$MEET_PROFILES_PATH`` env var, if set and non-empty.
+      2. ``~/.config/meet/speaker_profiles.json`` (``Path.home()``
+         evaluated now, not at module-import time — so callers that
+         override ``$HOME`` between import and call get the right path).
+    """
+    env = os.environ.get("MEET_PROFILES_PATH", "")
+    if env:
+        return Path(env).expanduser()
+    return Path.home() / _DEFAULT_PROFILES_REL
+
+
+def __getattr__(name: str):
+    """PEP 562 module-level attribute hook for back-compat.
+
+    ``from meet.voiceprint import PROFILES_PATH`` still works but now
+    resolves lazily at access time, not at import time.
+    """
+    if name == "PROFILES_PATH":
+        return _default_profiles_path()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+# ─── Constants ────────────────────────────────────────────────────────────────
 MATCH_THRESHOLD = 0.65  # cosine similarity — below this, don't auto-label
 MIN_SEGMENT_DURATION = 1.5   # seconds — skip very short segments for embedding
 MAX_SEGMENTS_PER_SPEAKER = 10  # how many segments to average per speaker
@@ -104,13 +140,21 @@ class SpeakerProfile(NamedTuple):
     n_sessions: int
 
 
-def load_profiles() -> dict[str, SpeakerProfile]:
-    """Load speaker profiles from disk. Returns empty dict if not found."""
-    if not PROFILES_PATH.exists():
+def load_profiles(
+    profiles_path: Path | None = None,
+) -> dict[str, SpeakerProfile]:
+    """Load speaker profiles from disk. Returns empty dict if not found.
+
+    Args:
+        profiles_path: Explicit path to the profile DB.  When ``None``,
+            falls back to :func:`_default_profiles_path`.
+    """
+    p = profiles_path or _default_profiles_path()
+    if not p.exists():
         return {}
 
     try:
-        data = json.loads(PROFILES_PATH.read_text(encoding="utf-8"))
+        data = json.loads(p.read_text(encoding="utf-8"))
     except Exception as exc:
         log.warning("Could not load speaker profiles: %s", exc)
         return {}
@@ -126,17 +170,26 @@ def load_profiles() -> dict[str, SpeakerProfile]:
     return profiles
 
 
-def save_profiles(profiles: dict[str, SpeakerProfile]) -> None:
-    """Save speaker profiles to disk."""
-    PROFILES_PATH.parent.mkdir(parents=True, exist_ok=True)
+def save_profiles(
+    profiles: dict[str, SpeakerProfile],
+    profiles_path: Path | None = None,
+) -> None:
+    """Save speaker profiles to disk.
+
+    Args:
+        profiles_path: Explicit path.  When ``None``, falls back to
+            :func:`_default_profiles_path`.
+    """
+    p = profiles_path or _default_profiles_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
     data = {
         name: {
-            "embedding": p.embedding.tolist(),
-            "n_sessions": p.n_sessions,
+            "embedding": prof.embedding.tolist(),
+            "n_sessions": prof.n_sessions,
         }
-        for name, p in profiles.items()
+        for name, prof in profiles.items()
     }
-    PROFILES_PATH.write_text(
+    p.write_text(
         json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
     )
 
@@ -350,6 +403,8 @@ def extract_speaker_embeddings(
 def enroll_session(
     session_dir: Path,
     progress_callback=None,
+    *,
+    profiles_path: Path | None = None,
 ) -> dict[str, bool]:
     """Enroll all labeled speakers from a session into the profile database.
 
@@ -357,6 +412,8 @@ def enroll_session(
         session_dir: Path to a labeled session directory (must have
                      session.json with speaker_labels and a transcript JSON).
         progress_callback: Optional callable(str) for status messages.
+        profiles_path: Explicit path to the profile DB.  When ``None``,
+            falls back to :func:`_default_profiles_path`.
 
     Returns:
         Dict mapping speaker name to True (enrolled) or False (failed).
@@ -425,7 +482,7 @@ def enroll_session(
         return {}
 
     # Merge into profiles
-    profiles = load_profiles()
+    profiles = load_profiles(profiles_path=profiles_path)
     status: dict[str, bool] = {}
 
     for name, emb in embeddings.items():
@@ -441,7 +498,7 @@ def enroll_session(
             _log(f"  New profile: {name}")
         status[name] = True
 
-    save_profiles(profiles)
+    save_profiles(profiles, profiles_path=profiles_path)
     return status
 
 
@@ -457,6 +514,8 @@ def identify_speakers(
     transcript_segments: list,
     speakers: list,              # list of Speaker objects (have .id attribute)
     channel_map: dict[str, str], # speaker_id -> 'mic' | 'system'
+    *,
+    profiles_path: Path | None = None,
 ) -> dict[str, SpeakerMatch]:
     """Identify speakers in a new meeting against the profile database.
 
@@ -468,12 +527,14 @@ def identify_speakers(
         transcript_segments: Segment objects from the new transcript.
         speakers: Speaker objects — their .id fields are used.
         channel_map: Map from speaker_id to dominant channel.
+        profiles_path: Explicit path to the profile DB.  When ``None``,
+            falls back to :func:`_default_profiles_path`.
 
     Returns:
         Dict mapping speaker_id to (matched_name, confidence).
         Speakers without a confident match are omitted.
     """
-    profiles = load_profiles()
+    profiles = load_profiles(profiles_path=profiles_path)
     if not profiles:
         return {}
 
@@ -564,6 +625,8 @@ def update_profiles_from_confirmed_labels(
     transcript_segments: list,
     confirmed_label_map: dict[str, str],  # speaker_id -> confirmed name
     channel_map: dict[str, str],
+    *,
+    profiles_path: Path | None = None,
 ) -> None:
     """Update profiles with confirmed labels from a just-completed meeting.
 
@@ -575,6 +638,8 @@ def update_profiles_from_confirmed_labels(
         transcript_segments: Segments from the transcript.
         confirmed_label_map: Map from speaker_id to confirmed human name.
         channel_map: Map from speaker_id to 'mic' | 'system'.
+        profiles_path: Explicit path to the profile DB.  When ``None``,
+            falls back to :func:`_default_profiles_path`.
     """
     if not confirmed_label_map:
         return
@@ -585,7 +650,7 @@ def update_profiles_from_confirmed_labels(
         log.warning("Could not load embedding model for profile update: %s", exc)
         return
 
-    profiles = load_profiles()
+    profiles = load_profiles(profiles_path=profiles_path)
     updated = []
 
     for speaker_id, name in confirmed_label_map.items():
@@ -628,5 +693,5 @@ def update_profiles_from_confirmed_labels(
         updated.append(name)
 
     if updated:
-        save_profiles(profiles)
+        save_profiles(profiles, profiles_path=profiles_path)
         log.info("Updated voice profiles for: %s", ", ".join(updated))
