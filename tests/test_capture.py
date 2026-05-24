@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from meet.capture import RecordingSession, RecordingStatus
+from millet.capture import RecordingSession, RecordingStatus
 
 
 # ─── Helpers ────────────────────────────────────────────────────────────────

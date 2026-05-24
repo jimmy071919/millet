@@ -61,8 +61,8 @@ import gi
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk, GLib, Gdk, Pango  # noqa: E402
 
-from meet.capture import DRAIN_SECONDS
-from meet.utils import fmt_elapsed, fmt_size
+from millet.capture import DRAIN_SECONDS
+from millet.utils import fmt_elapsed, fmt_size
 
 _log = logging.getLogger(__name__)
 
@@ -680,7 +680,7 @@ class MeetRecorderWindow(Gtk.Window):
     def _on_label_play(self, _widget, clip_path):
         """Play a speaker audio clip."""
         try:
-            from meet.label import play_clip
+            from millet.label import play_clip
 
             proc = play_clip(clip_path)
             # Don't block the UI — fire and forget
@@ -701,11 +701,11 @@ class MeetRecorderWindow(Gtk.Window):
         if not self._label_audio_path or not confirmed_label_map:
             return
         try:
-            from meet.voiceprint import update_profiles_from_confirmed_labels
+            from millet.voiceprint import update_profiles_from_confirmed_labels
 
             # We need the original (pre-relabel) segments, stored on the transcript
             # that was passed to _do_label_speakers.  Retrieve from the saved JSON.
-            from meet.label import _find_session_files, _load_transcript
+            from millet.label import _find_session_files, _load_transcript
 
             files = _find_session_files(self._label_audio_path.parent)
             transcript_json = files.get("json")
@@ -732,7 +732,7 @@ class MeetRecorderWindow(Gtk.Window):
             auto_matches: Optional dict of speaker_id -> SpeakerMatch with
                           auto-recognized names and confidence scores.
         """
-        from meet.label import extract_speaker_clip
+        from millet.label import extract_speaker_clip
 
         if auto_matches is None:
             auto_matches = {}
@@ -792,7 +792,7 @@ class MeetRecorderWindow(Gtk.Window):
         Returns True when ready to proceed (model downloaded or user
         chose to skip alignment).  Returns False if cancelled.
         """
-        from meet.transcribe import download_alignment_model
+        from millet.transcribe import download_alignment_model
 
         while True:
             GLib.idle_add(self._set_bg_status, f"{session_name}: downloading model...")
@@ -848,7 +848,7 @@ class MeetRecorderWindow(Gtk.Window):
     # ── Recording lifecycle ─────────────────────────────────────────────
 
     def _start_recording(self):
-        from meet.capture import create_session, check_prerequisites
+        from millet.capture import create_session, check_prerequisites
 
         issues = check_prerequisites()
         if issues:
@@ -1026,7 +1026,7 @@ class MeetRecorderWindow(Gtk.Window):
 
         Returns (config, transcript) on success, or (None, None) on failure.
         """
-        from meet.transcribe import (
+        from millet.transcribe import (
             TranscriptionConfig,
             transcribe as do_transcribe,
             AlignmentModelMissing,
@@ -1188,7 +1188,7 @@ class MeetRecorderWindow(Gtk.Window):
         if len(transcript.speakers) < 2:
             return transcript
 
-        from meet.label import (
+        from millet.label import (
             get_speakers as _get_speakers,
             find_session_files,
             relabel_transcript_in_memory,
@@ -1203,7 +1203,7 @@ class MeetRecorderWindow(Gtk.Window):
                 wav_path = session_files.get("wav")
 
                 # Build channel map: speaker_id -> 'mic' | 'system'
-                from meet.audio import (
+                from millet.audio import (
                     read_stereo_channels,
                     compute_speaker_channel_energy,
                 )
@@ -1225,7 +1225,7 @@ class MeetRecorderWindow(Gtk.Window):
                 auto_matches: dict = {}
                 if wav_path and wav_path.exists():
                     try:
-                        from meet.voiceprint import identify_speakers
+                        from millet.voiceprint import identify_speakers
 
                         auto_matches = identify_speakers(
                             wav_path,
@@ -1289,7 +1289,7 @@ class MeetRecorderWindow(Gtk.Window):
 
         Returns the PDF path if generated, or None.
         """
-        from meet.transcribe import post_process
+        from millet.transcribe import post_process
 
         if self._summarize:
             GLib.idle_add(self._set_bg_status, f"Summarizing: {session_name}...")
@@ -1312,7 +1312,7 @@ class MeetRecorderWindow(Gtk.Window):
     def _do_sync_bg(self, output: Path, session_name: str) -> None:
         """Check for scheduled meeting, prompt for sync (deferred), then sync."""
         try:
-            from meet.sync import check_sync_candidate, sync_session, is_sync_configured
+            from millet.sync import check_sync_candidate, sync_session, is_sync_configured
 
             if not is_sync_configured():
                 return
@@ -1322,7 +1322,7 @@ class MeetRecorderWindow(Gtk.Window):
                 return
 
             # Show confirmation prompt
-            from meet.sync import _date_from_session
+            from millet.sync import _date_from_session
 
             date_str = _date_from_session(output.parent)
             self._sync_event.clear()

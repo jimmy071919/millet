@@ -231,7 +231,7 @@ _MODEL_SIZES: dict[str, str] = {
     "fa": "~1.2 GB",
 }
 
-from meet.languages import LANG_NAMES as _LANG_NAMES  # noqa: E402
+from millet.languages import LANG_NAMES as _LANG_NAMES  # noqa: E402
 
 MODEL_SIZES = _MODEL_SIZES  # public accessor
 
@@ -635,7 +635,7 @@ class Transcript:
         return files
 
 
-from meet.utils import fmt_time as _fmt_time, fmt_srt_time as _fmt_srt_time  # noqa: E402
+from millet.utils import fmt_time as _fmt_time, fmt_srt_time as _fmt_srt_time  # noqa: E402
 
 
 def _extract_mono(audio_file: Path, channel: int = 0) -> Path:
@@ -1319,7 +1319,7 @@ def _label_speakers_from_channels(
     Returns:
         Updated (segments, speakers) with relabeled speaker IDs.
     """
-    from meet.audio import read_stereo_channels, compute_speaker_channel_energy
+    from millet.audio import read_stereo_channels, compute_speaker_channel_energy
 
     if not speakers:
         return segments, speakers
@@ -1434,7 +1434,7 @@ def _split_by_channel(
         If the stereo file can't be read or all segments land on one speaker,
         the original segments are returned unchanged with a single speaker.
     """
-    from meet.audio import read_stereo_channels
+    from millet.audio import read_stereo_channels
 
     stereo = read_stereo_channels(stereo_file)
     if stereo is None:
@@ -1564,7 +1564,7 @@ def post_process(
 
     if summarize:
         try:
-            from meet.summarize import summarize as do_summarize, SummaryConfig
+            from millet.summarize import summarize as do_summarize, SummaryConfig
 
             cfg_kwargs: dict = {}
             if summary_preset:
@@ -1583,7 +1583,7 @@ def post_process(
                 language=transcript.language,
                 progress_callback=progress_callback,
             )
-            from meet.frontmatter import context_from_transcript
+            from millet.frontmatter import context_from_transcript
 
             fm_ctx = context_from_transcript(transcript, output_dir)
             path = summary_result.save(
@@ -1599,7 +1599,7 @@ def post_process(
                 preset_summary_error = exc
 
     try:
-        from meet.pdf import generate_pdf
+        from millet.pdf import generate_pdf
 
         pdf_path = output_dir / f"{basename}.pdf"
         generate_pdf(
@@ -1616,7 +1616,7 @@ def post_process(
     wav_path = output_dir / f"{basename}.wav"
     if wav_path.exists():
         try:
-            from meet.audio import compress_audio
+            from millet.audio import compress_audio
 
             _log("Compressing audio to OGG/Opus...")
             ogg_path = compress_audio(wav_path)

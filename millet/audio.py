@@ -1,4 +1,4 @@
-"""Backward-compat shim — audio helpers live in `meetscribe-record` since 0.5.0.
+"""Backward-compat shim — audio helpers live in `millet-record` (formerly `meetscribe-record`) since meetscribe-offline 0.5.0.
 
 Re-exports all public names from `meet_record.audio`.
 """

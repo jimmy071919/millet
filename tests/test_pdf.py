@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from meet.pdf import (
+from millet.pdf import (
     _escape_xml,
     _group_speaker_turns,
     _is_rtl,
@@ -14,7 +14,7 @@ from meet.pdf import (
     _reshape_rtl,
     generate_pdf,
 )
-from meet.transcribe import Segment, Speaker, Transcript
+from millet.transcribe import Segment, Speaker, Transcript
 
 
 # ─── _is_rtl() ─────────────────────────────────────────────────────────────
@@ -150,7 +150,7 @@ class TestGeneratePdf:
         assert header == b"%PDF-"
 
     def test_with_summary(self, transcript, tmp_path):
-        from meet.summarize import MeetingSummary
+        from millet.summarize import MeetingSummary
 
         summary = MeetingSummary(
             markdown="## Overview\nA test meeting.",

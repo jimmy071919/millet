@@ -1,5 +1,88 @@
 # Changelog
 
+## v0.9.0 — 2026-05-24 — rename to `millet-pipeline`
+
+The package formerly known as `meetscribe-offline` is now
+**`millet-pipeline`**.  Named after the Ottoman *millet system* — the
+legal framework of communal autonomy that, in 1493, made it possible
+for two Sephardic Jewish brothers to establish Istanbul's first
+printing press, just one year after their expulsion from Spain.  Part
+of the [vezir](https://github.com/pretyflaco/vezir) ecosystem.
+
+This release is **all rename, no feature change.**  Functional
+behavior is identical to 0.8.3.  Companion: `millet-record 0.4.0`
+(formerly `meetscribe-record`); the `meet` console script is retained
+as a deprecation-warning alias of the new `millet` command for two
+minor versions before removal.
+
+### Why not `millet`?
+
+The bare `millet` name on PyPI is held by an unrelated dialogue-
+framework package (last upload 2021).  We've opened a PEP 541 takeover
+petition; if it succeeds in the future, a simpler `millet` name may
+follow in a later major release.  `-pipeline` is more honest than
+`-offline` (which was no longer accurate — the Tinfoil TEE and
+OpenRouter summary backends are network-attached).
+
+### Migration
+
+```bash
+# Out:
+pip uninstall meetscribe-offline meetscribe-record
+# In:
+pip install millet-pipeline           # full pipeline (pulls millet-record transitively)
+# or just the capture-only sibling:
+pip install millet-record
+```
+
+CLI: `meet` keeps working in `millet-record 0.4.0` and `0.5.0`, with a
+deprecation warning forwarding to `millet`.  Removed in `millet-record
+0.6.0`.
+
+### Changed
+
+* **Distribution name**: `meetscribe-offline` → `millet-pipeline`.
+* **Import name**: `from meet.X` → `from millet.X` (e.g. `from
+  millet.label import apply_labels`, `from millet.transcribe import
+  TranscriptionConfig`, `from millet.summarize import summarize`).
+* **Entry-point group**: `meet.subcommands` → `millet.subcommands`.
+  The legacy `meet.subcommands` group is also published for one
+  deprecation cycle so a transitional `meet` CLI from `millet-record
+  < 0.4.0` continues to load these subcommands.
+* **Compatibility shims** (`millet/audio.py`, `millet/utils.py`,
+  `millet/languages.py`, `millet/capture.py`) re-export from
+  `millet_record.*` (formerly `meet_record.*`).  Both import paths
+  work via the alias module shipped in `millet-record 0.4.0`.
+* **CLI prog_name**: `meet (meetscribe-offline)` →
+  `millet (millet-pipeline)` in `--version` output.
+* **PDF model attribution line**: "AI transcription (meetscribe)" →
+  "AI transcription (millet)".
+
+### Compatibility
+
+* **vezir 0.4.0** is the first vezir release pinning `millet-pipeline
+  >= 0.9.0`.  Vezir 0.3.x continues to work against `meetscribe-offline
+  0.8.3` (the last release under the old name); both old names stay on
+  PyPI as historical artifacts.
+* **No wire-format changes.**  Sessions produced by 0.8.3 are read
+  unchanged.  All artifact paths and formats unchanged.
+
+### What did NOT change
+
+* Module-internal class names, function names, function signatures.
+* `~/.config/meet/speaker_profiles.json` and other runtime paths
+  (these live in `vezir-data` for the vezir-managed deployments; the
+  standalone CLI's user-config path is the same).
+* The `meet-record-mac` Swift sidecar binary name.  (Renaming would
+  require macOS code-signing bundle-path changes.)
+
+### Reserved names (future submodules)
+
+`hattat`, `nahmias`, `basmahane`, `amire` — see the project's
+RENAMING handoff for the reasoning behind reserving each.
+
+---
+
 ## v0.8.3 — 2026-05-23
 
 ### Fixed

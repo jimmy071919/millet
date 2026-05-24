@@ -12,9 +12,9 @@ import pytest
 
 from unittest.mock import patch
 
-from meet.transcribe import Segment, Speaker, Transcript, TranscriptionConfig
-from meet.transcribe import _transcribe_asr, _transcribe_dual_channel
-from meet.transcribe import transcribe as do_transcribe
+from millet.transcribe import Segment, Speaker, Transcript, TranscriptionConfig
+from millet.transcribe import _transcribe_asr, _transcribe_dual_channel
+from millet.transcribe import transcribe as do_transcribe
 
 
 # ─── Transcript.to_text() ──────────────────────────────────────────────────
@@ -118,7 +118,7 @@ class TestSave:
 class TestLabelSpeakersFromChannels:
     def test_assigns_you_to_mic_dominant(self, transcript, stereo_wav_with_speakers):
         """The speaker with highest mic energy should be labeled YOU."""
-        from meet.transcribe import _label_speakers_from_channels
+        from millet.transcribe import _label_speakers_from_channels
 
         # Use raw SPEAKER_XX labels for the input
         raw_segments = [
@@ -155,7 +155,7 @@ class TestLabelSpeakersFromChannels:
 
     def test_remote_speakers_labeled(self, transcript, stereo_wav_with_speakers):
         """Non-YOU speakers should get REMOTE labels."""
-        from meet.transcribe import _label_speakers_from_channels
+        from millet.transcribe import _label_speakers_from_channels
 
         raw_segments = []
         speaker_map = {0: "SPEAKER_00", 1: "SPEAKER_01", 2: "SPEAKER_02",
@@ -179,7 +179,7 @@ class TestLabelSpeakersFromChannels:
 
     def test_empty_speakers(self, stereo_wav_with_speakers):
         """Empty speaker list should return inputs unchanged."""
-        from meet.transcribe import _label_speakers_from_channels
+        from millet.transcribe import _label_speakers_from_channels
 
         segs, spks = _label_speakers_from_channels(
             stereo_wav_with_speakers, [], [],
@@ -191,7 +191,7 @@ class TestLabelSpeakersFromChannels:
         """When no speaker has mic_ratio > 0.5, all should be labeled REMOTE."""
         import numpy as np
         import wave as wave_mod
-        from meet.transcribe import _label_speakers_from_channels
+        from millet.transcribe import _label_speakers_from_channels
 
         # Create a stereo WAV where system channel is always louder
         sr = 16000
@@ -235,7 +235,7 @@ class TestLabelSpeakersFromChannels:
         should still assign YOU in this case."""
         import numpy as np
         import wave as wave_mod
-        from meet.transcribe import _label_speakers_from_channels
+        from millet.transcribe import _label_speakers_from_channels
 
         sr = 16000
         # 9s of audio = three 3s segments back-to-back.
@@ -316,7 +316,7 @@ class TestLabelSpeakersFromChannels:
         pretyflaco/meetscribe-record#1, M7 sign-off."""
         import numpy as np
         import wave as wave_mod
-        from meet.transcribe import _label_speakers_from_channels
+        from millet.transcribe import _label_speakers_from_channels
 
         sr = 16000
 
