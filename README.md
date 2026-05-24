@@ -4,7 +4,8 @@
 [![PyPI](https://img.shields.io/pypi/v/meetscribe-offline.svg)](https://pypi.org/project/meetscribe-offline/)
 
 Fully local meeting transcription with speaker diarization, AI-generated
-summaries, and professional PDF output.
+summaries, and professional PDF output.  Full release history in
+[`CHANGELOG.md`](CHANGELOG.md).
 
 Records dual-channel audio (your mic + system audio) from **any** meeting
 app and produces diarized transcripts using WhisperX + pyannote-audio.

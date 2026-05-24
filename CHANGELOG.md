@@ -226,6 +226,155 @@
 
 ---
 
+## v0.6.1 — 2026-05-05
+
+### GUI
+
+- **Language dropdown** in the GTK Advanced expander to mitigate
+  Whisper's auto-detect failure on sparse / quiet audio (long opening
+  silences, short initial utterances).  Without an explicit language,
+  Whisper's classifier can mis-identify English audio as Japanese /
+  Chinese / Korean and produce pages of CJK hallucinations interspersed
+  with correctly-transcribed English fragments.  A real Blink dev-sync
+  recorded on 2026-05-05 was rendered useless this way: the meeting
+  was English but every artifact came out in Japanese hallucinations.
+- New fourth row in **Advanced**: a Language combobox with values
+  `auto` (default) plus `en`, `de`, `fr`, `es`, `tr`, `fa`, `it`, `pt`,
+  `nl`, `ja`, `zh`, `ko`, `ar`, `ru`.  Selection writes back into
+  `transcribe_kwargs["language"]` immediately so the next recording's
+  transcription picks it up.
+
+### Compatibility
+
+- CLI `--language` plumbing unchanged (in place since PR #4).
+- vezir 0.1.3 unaffected — vezir doesn't invoke the GUI.
+
+### PRs
+
+- #16 feat(gui): add Language dropdown to Advanced settings panel
+
+---
+
+## v0.6.0 — 2026-05-04
+
+### Apple Silicon (first-class support)
+
+- **New `--asr-backend [auto|whisperx|mlx]` flag.** `auto` selects
+  MLX Whisper on Apple Silicon when `mlx-whisper` is installed.
+  Contributed by @openoms in #4 (first external contribution).
+- **New `--torch-device [cuda|cpu|mps]` flag** for splitting
+  alignment / diarization device from the ASR device.
+- **New `--mlx-model` flag** to override the MLX repo (defaults to
+  alias-mapped variants of `--model`).
+- **`--device` and `--torch-device` auto-detect platform-appropriate
+  defaults**: `cpu` / `mps` on Apple Silicon, `cuda` elsewhere.  Mac
+  users no longer need to pass flags manually.
+- New collapsible **Advanced** settings panel in the GTK recorder
+  widget exposes the three new options without restarting.
+
+Install with `pip install 'meetscribe-offline[mlx]'` on Apple Silicon
+to pull in the MLX backend.
+
+### Robustness
+
+- `TranscriptionConfig` now validates `device` and `torch_device`
+  against runtime availability with clear `ValueError` messages.
+  Bad device combinations fail fast instead of deep inside whisperx.
+- MLX backend always logs a one-time info note that VAD options
+  (`--vad-onset`, `--vad-offset`) are inert under MLX.
+
+### Infrastructure
+
+- New GitHub Actions workflow runs `ruff` + focused `pytest` on
+  push and PR.  First green CI on the repo.
+
+### Compatibility
+
+- **vezir 0.1.2+** detects the new flags via help-parsing
+  (`meet_supports_option`); existing deployments work without
+  configuration changes.
+- **vezir-android** unchanged — communicates with vezir's HTTP API,
+  not meetscribe directly.
+- **`meetscribe-record`** dependency unchanged (still `>=0.1.0`).
+
+### PRs
+
+- #4 Add support for Apple Silicon and PyTorch device configuration (@openoms)
+- #10 Validate torch device availability in TranscriptionConfig (closes #7)
+- #11 Expose ASR backend, torch device, and MLX model in GUI (closes #5)
+- #12 Auto-default device on Apple Silicon (closes #8)
+- #13 Add minimal CI workflow with ruff and pytest (closes #9)
+- #14 Always note that MLX backend ignores VAD options (closes #6)
+
+---
+
+## v0.5.0 — 2026-04-25
+
+### Package split
+
+The capture-only modules (`capture`, `audio`, `utils`, `languages`)
+and the four capture-only subcommands (`record`, `devices`, `check`,
+`archive`) move into a new sibling package
+[`meetscribe-record`](https://github.com/pretyflaco/meetscribe-record).
+`meetscribe-offline` now depends on it, keeps the heavy
+transcription / diarization / summarization stack, and registers its
+remaining subcommands via Click plugin entry-points
+(`meet.subcommands`) so they appear under the same single `meet`
+console script that `meetscribe-record` provides.
+
+### Why
+
+A meetscribe install pulls ~3 GB of transitive deps (whisperx +
+torch + pyannote + ctranslate2 + reportlab).  For thin clients that
+only need to record audio (e.g. [vezir](https://github.com/pretyflaco/vezir)
+scribe widgets on teammate laptops), that's wasteful and slow to
+install.  With the split:
+
+| Profile | Install command | Footprint |
+|---|---|---|
+| Capture-only client | `pip install meetscribe-record` | ~30 MB |
+| Full pipeline | `pip install meetscribe-offline` | ~3 GB (pulls -record transitively) |
+
+### User-facing changes
+
+- `meet` console script is now provided by `meetscribe-record`.
+  When `meetscribe-offline` is also installed, the same `meet`
+  command exposes all 12 subcommands (4 capture + 8 offline) via
+  Click entry-point plugin discovery.
+- `meet --version` reports both packages: e.g.
+  `meet, version 0.5.0 (meetscribe-offline 0.5.0; meetscribe-record 0.1.0)`.
+- `meetscribe-offline` 0.5.0 no longer registers a `meet` console
+  script of its own; this avoids pip's last-installed-wins
+  entry-point conflict.
+
+### Internal changes
+
+- `meet/capture.py`, `meet/audio.py`, `meet/utils.py`,
+  `meet/languages.py` become thin compat shims that
+  `from meet_record.X import *`, so any existing
+  `from meet.capture import ...` continues to work.
+- `meet/cli.py` loses the 4 capture commands (~286 lines deleted).
+  The remaining 8 subcommands keep their `@main.command()`
+  decorators and are exposed by name to the `meet.subcommands`
+  entry-point group.
+- `meet/__init__.py` now exposes `__version__` resolved via
+  `importlib.metadata`, fixing the historical hardcoded `0.4.1`
+  literal in `cli.py`.
+
+### Compatibility
+
+Existing installs continue to work after `pip install --upgrade
+meetscribe-offline` — the dependency on `meetscribe-record>=0.1.0`
+pulls it in transparently.  No flag or config changes required.
+
+### Fixes
+
+- `cli.py` no longer reports a stale `0.4.1` from `python -m
+  meet.cli --version`; the version is resolved dynamically from
+  package metadata.
+
+---
+
 ## v0.4.2 — 2026-04-24
 
 ### Improvements
