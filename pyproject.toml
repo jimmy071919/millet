@@ -3,9 +3,9 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "meetscribe-offline"
-version = "0.8.3"
-description = "Fully local meeting transcription with speaker diarization, AI summaries, and PDF output. Builds on meetscribe-record for capture."
+name = "millet-pipeline"
+version = "0.9.0"
+description = "Meeting transcription pipeline (diarization, AI summaries, PDF output) under the vezir ecosystem.  Builds on millet-record for capture.  Named after the Ottoman millet system.  Successor to meetscribe-offline."
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "GPL-3.0-or-later"}
@@ -38,40 +38,53 @@ classifiers = [
     "Topic :: Office/Business",
 ]
 dependencies = [
-    "meetscribe-record>=0.1.0",
+    "millet-record>=0.4.0",
     "whisperx>=3.8",
     "click>=8.0",
     "reportlab>=4.0",
     "requests>=2.28",
     # certifi is already a transitive dependency via requests +
-    # huggingface_hub; listed explicitly because meet/__init__.py
+    # huggingface_hub; listed explicitly because millet/__init__.py
     # imports it directly for the F3 SSL_CERT_FILE injection (see
     # the M8 retrospective).
     "certifi",
 ]
 
-# `meet` console script is provided by meetscribe-record; offline-package
-# extends it with the heavier subcommands via the `meet.subcommands`
-# entry-point group below.
+# `millet` console script is provided by millet-record; the pipeline
+# package extends it with the heavier subcommands via the
+# `millet.subcommands` entry-point group below.  The legacy
+# `meet.subcommands` group is also published for one deprecation cycle
+# so a transitional `meet` CLI from millet-record < 0.4.0 still loads
+# our subcommands.
+[project.entry-points."millet.subcommands"]
+transcribe = "millet.cli:transcribe"
+run = "millet.cli:run"
+download = "millet.cli:download"
+translate = "millet.cli:translate"
+label = "millet.cli:label"
+enroll = "millet.cli:enroll"
+sync = "millet.cli:sync"
+gui = "millet.cli:gui"
+ingest = "millet.cli:ingest"
 
 [project.entry-points."meet.subcommands"]
-transcribe = "meet.cli:transcribe"
-run = "meet.cli:run"
-download = "meet.cli:download"
-translate = "meet.cli:translate"
-label = "meet.cli:label"
-enroll = "meet.cli:enroll"
-sync = "meet.cli:sync"
-gui = "meet.cli:gui"
-ingest = "meet.cli:ingest"
+transcribe = "millet.cli:transcribe"
+run = "millet.cli:run"
+download = "millet.cli:download"
+translate = "millet.cli:translate"
+label = "millet.cli:label"
+enroll = "millet.cli:enroll"
+sync = "millet.cli:sync"
+gui = "millet.cli:gui"
+ingest = "millet.cli:ingest"
 
 [project.urls]
-Homepage = "https://github.com/pretyflaco/meetscribe"
-Repository = "https://github.com/pretyflaco/meetscribe"
-Issues = "https://github.com/pretyflaco/meetscribe/issues"
+Homepage = "https://github.com/pretyflaco/millet"
+Repository = "https://github.com/pretyflaco/millet"
+Issues = "https://github.com/pretyflaco/millet/issues"
 
 [tool.setuptools.package-data]
-meet = ["prompts/*.md"]
+millet = ["prompts/*.md"]
 
 [project.optional-dependencies]
 rtl = ["arabic-reshaper>=3.0", "python-bidi>=0.4"]

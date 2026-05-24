@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from meet.summarize import _build_system_prompt
-from meet.languages import SECTION_HEADERS as _SECTION_HEADERS
+from millet.summarize import _build_system_prompt
+from millet.languages import SECTION_HEADERS as _SECTION_HEADERS
 
 
 class TestBuildSystemPrompt:
@@ -51,7 +51,7 @@ class TestBuildSystemPrompt:
         """When the prompt file is missing, the inline fallback must still
         carry the JSON contract so meet ingest / record never silently
         ships frontmatter-less summaries."""
-        import meet.summarize as sm
+        import millet.summarize as sm
 
         # Force the loader to act as if the prompt files were missing.
         monkeypatch.setattr(sm, "_load_prompt", lambda _: None)
@@ -62,7 +62,7 @@ class TestBuildSystemPrompt:
 
     def test_format_inline_fallback_includes_json_contract(self, monkeypatch):
         """Same contract for the two-pass format prompt fallback."""
-        import meet.summarize as sm
+        import millet.summarize as sm
 
         monkeypatch.setattr(sm, "_load_prompt", lambda _: None)
         prompt = sm._build_format_system_prompt("en")

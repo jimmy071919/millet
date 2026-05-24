@@ -1,4 +1,4 @@
-"""Speaker labeling module for meetscribe.
+"""Speaker labeling module for millet.
 
 Provides functions to:
   - List speakers in a transcribed session
@@ -19,8 +19,8 @@ from typing import Any
 
 import numpy as np
 
-from meet.audio import read_stereo_channels, compute_speaker_channel_energy
-from meet.transcribe import Segment, Speaker, Transcript
+from millet.audio import read_stereo_channels, compute_speaker_channel_energy
+from millet.transcribe import Segment, Speaker, Transcript
 
 
 # ─── Data ───────────────────────────────────────────────────────────────────
@@ -390,11 +390,11 @@ def apply_labels(
     if regenerate_summary:
         _log("Regenerating summary with updated speaker names...")
         try:
-            from meet.summarize import (
+            from millet.summarize import (
                 summarize as do_summarize, SummaryConfig,
                 is_backend_available, _backend_not_available_message,
             )
-            from meet.transcribe import ensure_gpu_available
+            from millet.transcribe import ensure_gpu_available
 
             cfg_kwargs: dict = {}
             if summary_preset:
@@ -415,7 +415,7 @@ def apply_labels(
                     transcript.to_text(), summary_config,
                     language=transcript.language,
                 )
-                from meet.frontmatter import context_from_transcript
+                from millet.frontmatter import context_from_transcript
 
                 fm_ctx = context_from_transcript(transcript, session_dir)
                 path = summary_result.save(
@@ -444,7 +444,7 @@ def apply_labels(
         # we don't accidentally rename inside structural keys, and so the
         # PDF gets a clean Markdown body.
         _log("Updating speaker names in existing summary...")
-        from meet.frontmatter import (
+        from millet.frontmatter import (
             parse_frontmatter_block,
             render_frontmatter_block,
             write_frontmatter_sidecar,
@@ -488,7 +488,7 @@ def apply_labels(
         # Load body-only summary for PDF embedding.
         # Read the original summary meta to preserve model name and backend
         # (needed for CONFIDENTIAL watermark on TEE-backed summaries).
-        from meet.summarize import MeetingSummary
+        from millet.summarize import MeetingSummary
         orig_model = "(relabeled)"
         orig_backend = ""
         orig_elapsed = 0.0
@@ -509,7 +509,7 @@ def apply_labels(
     # ── PDF ──
     _log("Regenerating PDF...")
     try:
-        from meet.pdf import generate_pdf
+        from millet.pdf import generate_pdf
 
         pdf_path = session_dir / f"{basename}.pdf"
         generate_pdf(

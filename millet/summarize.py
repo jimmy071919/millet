@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any, Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from meet.frontmatter import FrontmatterContext
+    from millet.frontmatter import FrontmatterContext
 
 import re
 import requests
@@ -87,7 +87,7 @@ DEFAULT_PRESET = "high-quality"
 # Backward-compatible aliases (referenced by translate command, etc.)
 DEFAULT_MODEL = DEFAULT_OLLAMA_MODEL
 
-from meet.languages import SECTION_HEADERS as _SECTION_HEADERS, LANG_NAMES as _LANGUAGE_NAMES  # noqa: E402
+from millet.languages import SECTION_HEADERS as _SECTION_HEADERS, LANG_NAMES as _LANGUAGE_NAMES  # noqa: E402
 
 # ─── Prompt loading ────────────────────────────────────────────────────────
 
@@ -429,7 +429,7 @@ class MeetingSummary:
         import datetime
 
         # Local import to avoid a circular import at module load time.
-        from meet.frontmatter import (
+        from millet.frontmatter import (
             build_frontmatter,
             render_frontmatter_block,
             write_frontmatter_sidecar,
@@ -1055,7 +1055,7 @@ def _dispatch(
     # Split the trailing JSON data block off the markdown body so that
     # PDF rendering keeps using the body and frontmatter writers can
     # consume the parsed data.  Done once here so every backend benefits.
-    from meet.frontmatter import split_body_and_data
+    from millet.frontmatter import split_body_and_data
 
     body, data, data_error = split_body_and_data(result.markdown)
     result.markdown = body

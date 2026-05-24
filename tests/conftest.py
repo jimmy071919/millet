@@ -1,4 +1,4 @@
-"""Shared test fixtures for meetscribe tests."""
+"""Shared test fixtures for millet tests."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from meet.transcribe import Segment, Speaker, Transcript
+from millet.transcribe import Segment, Speaker, Transcript
 
 
 # ─── Transcript fixture ────────────────────────────────────────────────────

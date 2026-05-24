@@ -21,8 +21,8 @@ from pathlib import Path
 
 import click
 
-from meet.capture import DRAIN_SECONDS
-from meet.utils import fmt_elapsed, fmt_size
+from millet.capture import DRAIN_SECONDS
+from millet.utils import fmt_elapsed, fmt_size
 
 
 def _drain_countdown(session, seconds: int = DRAIN_SECONDS) -> None:
@@ -73,7 +73,7 @@ def _generate_summary(
     is used, which is more accurate on local 20B-class models at the cost
     of one extra LLM call.
     """
-    from meet.summarize import summarize as do_summarize, SummaryConfig
+    from millet.summarize import summarize as do_summarize, SummaryConfig
 
     config_kwargs = {}
     if summary_preset:
@@ -99,7 +99,7 @@ def _generate_summary(
             language=transcript.language,
             progress_callback=_cli_progress,
         )
-        from meet.frontmatter import context_from_transcript
+        from millet.frontmatter import context_from_transcript
 
         fm_ctx = context_from_transcript(transcript, out_dir)
         path = result.save(out_dir, basename, frontmatter_context=fm_ctx)
@@ -120,7 +120,7 @@ def _generate_summary(
 
 def _generate_pdf(transcript, out_dir, basename, summary_result, files):
     """Generate a PDF transcript with optional summary."""
-    from meet.pdf import generate_pdf
+    from millet.pdf import generate_pdf
 
     pdf_path = out_dir / f"{basename}.pdf"
     try:
@@ -184,21 +184,25 @@ def _recording_loop(session) -> None:
 
 
 def _resolve_version() -> str:
-    """Resolve the meetscribe-offline package version dynamically.
+    """Resolve the millet-pipeline (formerly meetscribe-offline) package
+    version dynamically.
 
     Avoids the historical bug where `version="0.4.1"` was hardcoded and
     drifted from the real package version.
     """
     try:
         from importlib.metadata import version
-        return version("meetscribe-offline")
+        try:
+            return version("millet-pipeline")
+        except Exception:
+            return version("meetscribe-offline")
     except Exception:
         from . import __version__
         return __version__
 
 
 @click.group()
-@click.version_option(version=_resolve_version(), prog_name="meet (meetscribe-offline)")
+@click.version_option(version=_resolve_version(), prog_name="millet (millet-pipeline)")
 def main():
     """Local meeting transcription with speaker diarization."""
     pass
@@ -354,7 +358,7 @@ def transcribe(
     mixdown,
 ):
     """Transcribe a recorded audio file with speaker diarization."""
-    from meet.transcribe import (
+    from millet.transcribe import (
         TranscriptionConfig,
         transcribe as do_transcribe,
         AlignmentModelMissing,
@@ -613,8 +617,8 @@ def run(
     mixdown,
 ):
     """Record a meeting, then transcribe when stopped with Ctrl+C."""
-    from meet.capture import create_session, check_prerequisites
-    from meet.transcribe import (
+    from millet.capture import create_session, check_prerequisites
+    from millet.transcribe import (
         TranscriptionConfig,
         transcribe as do_transcribe,
         AlignmentModelMissing,
@@ -762,7 +766,7 @@ def download(languages, download_all):
         meet download de tr fa    # download German, Turkish, Farsi
         meet download --all       # download all supported models
     """
-    from meet.transcribe import (
+    from millet.transcribe import (
         get_supported_alignment_languages,
         download_alignment_model,
     )
@@ -867,7 +871,7 @@ def translate(session_dir, target_lang, summary_model):
 
     basename = txt_file.stem
 
-    from meet.summarize import OLLAMA_BASE_URL, DEFAULT_MODEL, is_ollama_available
+    from millet.summarize import OLLAMA_BASE_URL, DEFAULT_MODEL, is_ollama_available
 
     ollama_url = OLLAMA_BASE_URL
     model_name = summary_model or DEFAULT_MODEL
@@ -876,7 +880,7 @@ def translate(session_dir, target_lang, summary_model):
         click.echo("Error: Ollama is not running. Start with: ollama serve", err=True)
         raise SystemExit(1)
 
-    from meet.languages import LANG_NAMES
+    from millet.languages import LANG_NAMES
 
     target_name = LANG_NAMES.get(target_lang, target_lang)
 
@@ -886,7 +890,7 @@ def translate(session_dir, target_lang, summary_model):
     click.echo()
 
     # Free GPU memory from Ollama models that might be loaded
-    from meet.transcribe import ensure_gpu_available
+    from millet.transcribe import ensure_gpu_available
 
     ensure_gpu_available()
 
@@ -1022,7 +1026,7 @@ def label(session_dir, no_audio, no_summary, auto, summary_preset, summary_backe
         meet label ~/meet-recordings/meeting-20260313-214133 --auto
         meet label ~/meet-recordings/meeting-20260313-214133 --auto --no-summary
     """
-    from meet.label import (
+    from millet.label import (
         get_speakers,
         extract_speaker_clip,
         play_clip,
@@ -1075,7 +1079,7 @@ def label(session_dir, no_audio, no_summary, auto, summary_preset, summary_backe
         )
 
         try:
-            from meet.voiceprint import identify_speakers, load_profiles
+            from millet.voiceprint import identify_speakers, load_profiles
 
             profiles = load_profiles()
             if not profiles:
@@ -1250,7 +1254,7 @@ def label(session_dir, no_audio, no_summary, auto, summary_preset, summary_backe
             click.echo()
             click.echo("Updating voice profiles with manually confirmed labels...")
             try:
-                from meet.voiceprint import update_profiles_from_confirmed_labels
+                from millet.voiceprint import update_profiles_from_confirmed_labels
 
                 transcript = _load_transcript(files["json"])
                 # Rebuild channel_map if not already done
@@ -1293,7 +1297,7 @@ def enroll(session_dirs, list_profiles):
         meet enroll ~/meet-recordings/meeting-20260330-*
         meet enroll --list
     """
-    from meet.voiceprint import enroll_session, load_profiles, PROFILES_PATH
+    from millet.voiceprint import enroll_session, load_profiles, PROFILES_PATH
 
     if list_profiles:
         profiles = load_profiles()
@@ -1389,7 +1393,7 @@ def sync(session_dirs, force, meeting_type, list_schedule, init_config):
         meet sync --force --meeting-type weekly-sync ~/meet-recordings/meeting-20260330-*
         meet sync --list-schedule
     """
-    from meet.sync import (
+    from millet.sync import (
         detect_meeting_type,
         sync_session,
         load_sync_config,
@@ -1592,7 +1596,7 @@ def gui(
     ollama_singlepass,
 ):
     """Launch the GUI recording widget."""
-    from meet.gui import launch
+    from millet.gui import launch
 
     launch(
         output_dir=output_dir,
@@ -1623,7 +1627,8 @@ def gui(
 
 def _has_frontmatter(summary_meta_path: Path) -> bool:
     """Return True if the session's existing summary already carries
-    structured frontmatter (i.e. was produced by meetscribe >= 0.7.0)."""
+    structured frontmatter (i.e. was produced by meetscribe >= 0.7.0 /
+    millet-pipeline >= 0.9.0)."""
     if not summary_meta_path.exists():
         return False
     try:
@@ -1651,9 +1656,9 @@ def _ingest_one_session(
     Returns (ok, message) where ``ok`` is True on success or skip and
     False on failure.
     """
-    from meet.label import _find_session_files, _load_transcript
-    from meet.frontmatter import context_from_transcript
-    from meet.summarize import (
+    from millet.label import _find_session_files, _load_transcript
+    from millet.frontmatter import context_from_transcript
+    from millet.summarize import (
         SummaryConfig,
         summarize as do_summarize,
     )
@@ -1704,7 +1709,7 @@ def _ingest_one_session(
 
     if re_pdf:
         try:
-            from meet.pdf import generate_pdf
+            from millet.pdf import generate_pdf
 
             pdf_path = session_dir / f"{basename}.pdf"
             generate_pdf(
@@ -1829,7 +1834,7 @@ def ingest(
     # Free GPU memory before kicking off summaries (matches behavior of
     # `meet transcribe`) — only affects the ollama backend.
     try:
-        from meet.transcribe import ensure_gpu_available
+        from millet.transcribe import ensure_gpu_available
 
         if (summary_backend or "").lower() in ("", "ollama"):
             ensure_gpu_available()

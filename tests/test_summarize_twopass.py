@@ -7,8 +7,8 @@ from unittest.mock import patch
 
 import pytest
 
-from meet import summarize as sm
-from meet.summarize import (
+from millet import summarize as sm
+from millet.summarize import (
     MeetingSummary,
     SummaryConfig,
     _build_extract_system_prompt,

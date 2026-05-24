@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from meet.label import (
+from millet.label import (
     SpeakerInfo,
     _detect_speaker_channels,
     _find_session_files,
@@ -19,7 +19,7 @@ from meet.label import (
     get_speakers,
     relabel_transcript_in_memory,
 )
-from meet.transcribe import Segment, Speaker, Transcript
+from millet.transcribe import Segment, Speaker, Transcript
 
 
 # ─── _find_session_files() ─────────────────────────────────────────────────

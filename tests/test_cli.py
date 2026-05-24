@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 from click.testing import CliRunner
 
-from meet import cli as meet_cli
+from millet import cli as meet_cli
 
 
 def _stub_transcribe_pipeline():
@@ -55,7 +55,7 @@ class TestTranscribeDeviceDefault:
         # Capture the TranscriptionConfig actually constructed.
         captured: dict = {}
 
-        from meet.transcribe import TranscriptionConfig as RealCfg
+        from millet.transcribe import TranscriptionConfig as RealCfg
 
         def _spy_cfg(**kwargs):
             cfg = RealCfg(**kwargs)
@@ -91,7 +91,7 @@ class TestTranscribeDeviceDefault:
         )
 
         captured: dict = {}
-        from meet.transcribe import TranscriptionConfig as RealCfg
+        from millet.transcribe import TranscriptionConfig as RealCfg
 
         def _spy_cfg(**kwargs):
             cfg = RealCfg(**kwargs)
@@ -121,7 +121,7 @@ class TestTranscribeDeviceDefault:
         monkeypatch.setattr("meet.transcribe._mlx_available", lambda: False)
 
         captured: dict = {}
-        from meet.transcribe import TranscriptionConfig as RealCfg
+        from millet.transcribe import TranscriptionConfig as RealCfg
 
         def _spy_cfg(**kwargs):
             cfg = RealCfg(**kwargs)

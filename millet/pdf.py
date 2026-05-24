@@ -39,8 +39,8 @@ from reportlab.platypus import (
 )
 
 if TYPE_CHECKING:
-    from meet.transcribe import Transcript
-    from meet.summarize import MeetingSummary
+    from millet.transcribe import Transcript
+    from millet.summarize import MeetingSummary
 
 
 # ─── Font registration ──────────────────────────────────────────────────────
@@ -54,7 +54,7 @@ _NOTO_ARABIC_BOLD = "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Bold.ttf"
 
 _fonts_registered = False
 
-from meet.languages import RTL_LANGUAGES as _RTL_LANGUAGES, PDF_SECTIONS as _PDF_SECTIONS  # noqa: E402
+from millet.languages import RTL_LANGUAGES as _RTL_LANGUAGES, PDF_SECTIONS as _PDF_SECTIONS  # noqa: E402
 
 
 def _register_fonts():
@@ -273,7 +273,7 @@ def _build_styles(language: str = "en"):
 
 # ─── Helpers ────────────────────────────────────────────────────────────────
 
-from meet.utils import fmt_time_short as _fmt_time  # noqa: E402
+from millet.utils import fmt_time_short as _fmt_time  # noqa: E402
 
 
 def _fmt_duration(seconds: float) -> str:
@@ -568,7 +568,7 @@ def generate_pdf(
         speaker_names = ", ".join(s.label or s.id for s in transcript.speakers)
         meta_parts.append(f"Participants: {speaker_names}")
 
-    meta_parts.append("Recording source: AI transcription (meetscribe)")
+    meta_parts.append("Recording source: AI transcription (millet)")
 
     for part in meta_parts:
         story.append(Paragraph(_escape_xml(part), styles["subtitle"]))

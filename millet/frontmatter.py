@@ -1,6 +1,6 @@
 """Structured YAML frontmatter for meeting summaries (schema v1).
 
-Every ``.summary.md`` produced by meetscribe ships with a YAML frontmatter
+Every ``.summary.md`` produced by millet ships with a YAML frontmatter
 block containing a typed view of the meeting: action items, decisions,
 participants, and topics.  This module owns:
 
@@ -17,7 +17,7 @@ Design notes
 
 We intentionally do **not** depend on PyYAML.  The schema is small and
 well-typed; a few hundred lines of writer + a strict tolerant parser
-keeps meetscribe's runtime install footprint identical.
+keeps millet's runtime install footprint identical.
 
 Likewise we do **not** invent due dates, GitHub handles, or commitments
 that the LLM did not produce.  Every list is allowed to be empty; the
@@ -39,7 +39,7 @@ from typing import Any
 SCHEMA_VERSION = 1
 
 # Allowed values for the ``type`` field. Kept narrow on purpose; "memo" and
-# "dictation" anticipate the fast-path pipelines vezir/meetscribe will grow.
+# "dictation" anticipate the fast-path pipelines vezir/millet will grow.
 ALLOWED_TYPES = ("meeting", "memo", "dictation")
 
 # ─── Data extraction from LLM output ───────────────────────────────────────
@@ -249,7 +249,7 @@ def build_frontmatter(
 
     ``extracted`` is the dict parsed from the LLM's JSON data block (or
     ``None`` if it failed to parse).  ``context`` provides session-level
-    fields that come from meetscribe, not the LLM.  We deliberately keep
+    fields that come from millet, not the LLM.  We deliberately keep
     the schema small and let downstream tooling (vezir indexer) derive
     richer views.
     """
@@ -761,7 +761,7 @@ def empty_frontmatter(context: FrontmatterContext, *, error: str | None = None) 
     return build_frontmatter(None, context, extraction_error=error)
 
 
-# ─── Convenience: build context from a meetscribe Transcript + session ─────
+# ─── Convenience: build context from a millet Transcript + session ─────
 
 
 def _read_session_metadata(session_dir: Path) -> dict[str, Any]:
@@ -776,7 +776,7 @@ def _read_session_metadata(session_dir: Path) -> dict[str, Any]:
 
 
 def _channel_for_speaker_label(label: str) -> str | None:
-    """Map a meetscribe speaker label to the originating channel.
+    """Map a millet speaker label to the originating channel.
 
     Mic-side labels (YOU, SPEAKER_YOU) -> "mic"; remote labels
     (REMOTE, REMOTE_1, ...) -> "system".  Unknown labels stay None;

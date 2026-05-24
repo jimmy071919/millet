@@ -1,7 +1,10 @@
-"""meetscribe-offline — full meeting transcription pipeline.
+"""millet-pipeline — meeting transcription pipeline (successor to meetscribe-offline).
 
-Builds on meetscribe-record (capture primitives) and adds transcription,
-diarization, summarization, PDF, GUI, sync.
+Builds on millet-record (capture primitives) and adds transcription,
+diarization, summarization, PDF, GUI, sync.  Named after the Ottoman
+millet system — the legal framework of communal autonomy that, in 1493,
+made it possible for two Sephardic Jewish brothers to establish
+Istanbul's first printing press.  Part of the vezir ecosystem.
 """
 
 # ── F3 fix (M8, reported by @patternn 2026-05-17): inject certifi's CA
@@ -41,6 +44,11 @@ if "SSL_CERT_FILE" not in _os.environ:
 
 try:
     from importlib.metadata import version as _pkg_version
-    __version__ = _pkg_version("meetscribe-offline")
+    try:
+        __version__ = _pkg_version("millet-pipeline")
+    except Exception:
+        # During the 0.9.0 transition, the legacy distribution name
+        # may still be the one installed.  Honor it as a fallback.
+        __version__ = _pkg_version("meetscribe-offline")
 except Exception:
-    __version__ = "0.7.2"
+    __version__ = "0.9.0"

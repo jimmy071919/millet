@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from meet.frontmatter import (
+from millet.frontmatter import (
     SCHEMA_VERSION,
     FrontmatterContext,
     FrontmatterValidationError,

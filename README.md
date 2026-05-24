@@ -1,11 +1,25 @@
-# meetscribe
+# millet
 
-[![CI](https://github.com/pretyflaco/meetscribe/actions/workflows/ci.yml/badge.svg)](https://github.com/pretyflaco/meetscribe/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/meetscribe-offline.svg)](https://pypi.org/project/meetscribe-offline/)
+[![CI](https://github.com/pretyflaco/millet/actions/workflows/ci.yml/badge.svg)](https://github.com/pretyflaco/millet/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/millet-pipeline.svg)](https://pypi.org/project/millet-pipeline/)
 
-Fully local meeting transcription with speaker diarization, AI-generated
-summaries, and professional PDF output.  Full release history in
-[`CHANGELOG.md`](CHANGELOG.md).
+> **Millet** is a meeting transcription, summarization, and PDF output
+> tool.  It's named after the Ottoman *millet system* — the legal
+> framework of communal autonomy that, in 1493, made it possible for
+> two Sephardic Jewish brothers to establish Istanbul's first printing
+> press, just one year after their expulsion from Spain.  Like the
+> millets it's named after, this tool operates under its own rules,
+> on your own machine, within the broader
+> [vezir](https://github.com/pretyflaco/vezir) ecosystem.
+
+Formerly known as **meetscribe**.  PyPI distribution name:
+`millet-pipeline` (the bare `millet` slot on PyPI is held by an
+unrelated dormant 2021 package).  See
+[CHANGELOG.md](CHANGELOG.md) for the rename details and full release
+history.
+
+Meeting transcription with speaker diarization, AI-generated summaries,
+and professional PDF output.
 
 Records dual-channel audio (your mic + system audio) from **any** meeting
 app and produces diarized transcripts using WhisperX + pyannote-audio.
@@ -19,7 +33,7 @@ every page), or `alternative` (Kimi K2.6 via OpenRouter).
 
 ## Works with any meeting app
 
-Because meetscribe captures system audio at the OS level, it works with
+Because millet captures system audio at the OS level, it works with
 every voice/video call application:
 
 - **Zoom**
@@ -79,9 +93,9 @@ including browser-based meetings and standalone desktop clients.
   [vezir](https://github.com/pretyflaco/vezir)
 - **GTK3 GUI widget** -- small always-on-top window with record/stop, timer,
   and one-click access to results
-- **CLI** -- `meet record`, `meet transcribe`, `meet run`, `meet gui`,
-  `meet label`, `meet enroll`, `meet sync`, `meet ingest`,
-  `meet devices`, `meet check`
+- **CLI** -- `millet record`, `millet transcribe`, `millet run`, `millet gui`,
+  `millet label`, `millet enroll`, `millet sync`, `millet ingest`,
+  `millet devices`, `millet check`
 - **Per-session folders** -- each recording gets its own organized directory
 - **Offline-first** -- after initial model download, core features work without
   internet; cloud backends are optional upgrades
@@ -90,19 +104,19 @@ including browser-based meetings and standalone desktop clients.
 
 ```bash
 # Install from PyPI
-pip install meetscribe-offline
+pip install millet-pipeline
 
 # Set your HuggingFace token (required for speaker diarization)
 export HF_TOKEN=hf_your_token_here
 
 # Record a meeting, then auto-transcribe + summarize when you stop
-meet run
+millet run
 # Press Ctrl+C when the meeting ends
 ```
 
 ## Requirements
 
-meetscribe runs in two configurations:
+millet runs in two configurations:
 
 **Linux desktop** (full pipeline: record + transcribe + label + sync)
 
@@ -116,10 +130,10 @@ meetscribe runs in two configurations:
 
 - M1 / M2 / M3 Mac running macOS
 - Python 3.10+, ffmpeg
-- `pip install 'meetscribe-offline[mlx]'` to auto-select MLX Whisper for ASR
+- `pip install 'millet-pipeline[mlx]'` to auto-select MLX Whisper for ASR
 - HuggingFace token, Ollama as above
-- Note: `meet record` / `meet run` (audio capture) require Linux. On a Mac,
-  feed in audio captured elsewhere via `meet transcribe <file.wav>`, or use
+- Note: `millet record` / `millet run` (audio capture) require Linux. On a Mac,
+  feed in audio captured elsewhere via `millet transcribe <file.wav>`, or use
   [vezir](https://github.com/pretyflaco/vezir) to run a Mac as a server with
   Linux/Android thin clients providing the recordings.
 
@@ -137,18 +151,18 @@ sudo apt install ffmpeg pulseaudio-utils
 sudo dnf install ffmpeg pulseaudio-utils
 ```
 
-### 2. Install meetscribe
+### 2. Install millet
 
 ```bash
 # From PyPI (recommended)
-pip install meetscribe-offline
+pip install millet-pipeline
 
 # Optional: pull the Tinfoil TEE SDK to enable the Confidential preset
-pip install 'meetscribe-offline[tee]'
+pip install 'millet-pipeline[tee]'
 
 # From source
-git clone https://github.com/pretyflaco/meetscribe
-cd meetscribe
+git clone https://github.com/pretyflaco/millet
+cd millet
 pip install -e .
 ```
 
@@ -180,7 +194,7 @@ ollama pull qwen3.5:9b
 ### 5. Verify setup
 
 ```bash
-meet check
+millet check
 ```
 
 ## Usage
@@ -188,7 +202,7 @@ meet check
 ### Check audio devices
 
 ```bash
-meet devices
+millet devices
 ```
 
 ### Record a meeting
@@ -196,22 +210,22 @@ meet devices
 Start recording before or during your meeting:
 
 ```bash
-meet record
+millet record
 ```
 
 Press Ctrl+C when the meeting ends. A 10-second drain buffer ensures all audio
-is captured. Recordings are saved to `~/meet-recordings/`.
+is captured. Recordings are saved to `~/millet-recordings/`.
 
 Options:
 - `-o /path` -- save recordings elsewhere
 - `--virtual-sink` -- create isolated virtual sink (avoids capturing notification sounds)
-- `--mic <source>` -- specify mic source (use `meet devices` to find names)
+- `--mic <source>` -- specify mic source (use `millet devices` to find names)
 - `--monitor <source>` -- specify monitor source
 
 ### Transcribe a recording
 
 ```bash
-meet transcribe ~/meet-recordings/meeting-20260312-140000/meeting-20260312-140000.wav
+millet transcribe ~/millet-recordings/meeting-20260312-140000/meeting-20260312-140000.wav
 ```
 
 Options:
@@ -219,7 +233,7 @@ Options:
 - `-l auto` -- language code or `auto` to auto-detect (default: `auto`; e.g. `en`, `de`, `tr`, `fa`)
 - `--asr-backend auto` -- ASR backend: `auto`, `whisperx`, or `mlx`. On Apple
   Silicon with `mlx-whisper` installed, `auto` uses MLX Whisper for ASR.
-  MLX only replaces the transcription step; meetscribe still requires
+  MLX only replaces the transcription step; millet still requires
   WhisperX for audio loading, alignment, and diarization.
 - `--mlx-model <repo-or-path>` -- MLX Whisper model path/repo (default: maps
   `large-v3-turbo` to `mlx-community/whisper-large-v3-turbo`)
@@ -248,7 +262,7 @@ quieter voice.
 Use `--mixdown dual` to transcribe each channel independently:
 
 ```bash
-meet transcribe --mixdown dual ~/meet-recordings/meeting-20260312-140000/
+millet transcribe --mixdown dual ~/millet-recordings/meeting-20260312-140000/
 ```
 
 This skips diarization entirely (channel identity = speaker identity) and
@@ -259,7 +273,7 @@ both voices appear on both channels.
 ### Record + transcribe in one shot
 
 ```bash
-meet run
+millet run
 ```
 
 Records until Ctrl+C, then automatically transcribes, generates a summary,
@@ -269,7 +283,7 @@ and produces a PDF. Takes all options from both `record` and `transcribe`
 ### Launch the GUI widget
 
 ```bash
-meet gui
+millet gui
 ```
 
 A small always-on-top window with:
@@ -287,15 +301,15 @@ label (YOU, REMOTE_1, etc.).
 If meeting sync is configured and the recording matches a scheduled meeting,
 a **sync confirmation prompt** appears with Push / Skip buttons.
 
-![meetscribe GUI](screenshot.png)
+![millet GUI](screenshot.png)
 
 ### Label speakers after the fact
 
 ```bash
-meet label ~/meet-recordings/meeting-20260313-214133
+millet label ~/millet-recordings/meeting-20260313-214133
 ```
 
-For each speaker in the recording, `meet label`:
+For each speaker in the recording, `millet label`:
 1. Shows a table of all speakers (label, channel, segment count, sample text)
 2. Plays a short audio clip from that speaker's channel (requires `ffplay`)
 3. Prompts you to enter a real name (press Enter to keep the existing label)
@@ -306,7 +320,7 @@ Confident matches are applied without prompting; only unrecognized speakers get
 the interactive prompt:
 
 ```bash
-meet label --auto ~/meet-recordings/meeting-20260313-214133
+millet label --auto ~/millet-recordings/meeting-20260313-214133
 ```
 
 Options:
@@ -320,7 +334,7 @@ Options:
 Each recording gets its own session directory:
 
 ```
-~/meet-recordings/meeting-20260312-140000/
+~/millet-recordings/meeting-20260312-140000/
     meeting-20260312-140000.wav                 # Stereo audio (16kHz)
     meeting-20260312-140000.session.json        # Recording metadata
     meeting-20260312-140000.ffmpeg.log          # ffmpeg capture log
@@ -392,29 +406,29 @@ your meetings.
 
 ### Backfilling existing sessions
 
-Sessions recorded before meetscribe 0.7.0 don't carry frontmatter.
+Sessions recorded before millet 0.7.0 don't carry frontmatter.
 Re-extract it for one or more sessions with:
 
 ```bash
 # Re-run the LLM to produce frontmatter; idempotent (skips sessions
 # whose .summary.meta.json already records data_extracted=true).
-meet ingest ~/meet-recordings/meeting-2026*
+millet ingest ~/millet-recordings/meeting-2026*
 
 # Force re-extraction even when frontmatter is already present:
-meet ingest --force ~/meet-recordings/meeting-20260312-140000
+millet ingest --force ~/millet-recordings/meeting-20260312-140000
 
 # Preview without invoking the LLM:
-meet ingest --dry-run ~/meet-recordings/meeting-2026*
+millet ingest --dry-run ~/millet-recordings/meeting-2026*
 ```
 
-`meet ingest` accepts the same `--summary-backend` /
+`millet ingest` accepts the same `--summary-backend` /
 `--summary-model` / `--ollama-singlepass` flags as
-`meet transcribe` and regenerates the PDF by default
+`millet transcribe` and regenerates the PDF by default
 (`--no-pdf` to skip).
 
 ## AI summary
 
-meetscribe generates a structured meeting summary with:
+millet generates a structured meeting summary with:
 - Overview
 - Key topics discussed
 - Action items (with owners when mentioned)
@@ -433,25 +447,25 @@ meetscribe generates a structured meeting summary with:
 Change the model:
 
 ```bash
-meet run --summary-model gemma3:12b
+millet run --summary-model gemma3:12b
 ```
 
 Disable summaries:
 
 ```bash
-meet run --no-summarize
+millet run --no-summarize
 ```
 
 ### Summary backends
 
-meetscribe supports five backends with automatic fallback:
+millet supports five backends with automatic fallback:
 
 | Backend | Setup | Cost | Quality | Privacy |
 |---------|-------|------|---------|---------|
 | `ollama` (default) | `ollama serve` + `ollama pull qwen3.5:9b` | Free | Good | Fully local |
 | `openrouter` | Set `OPENROUTER_API_KEY` | Pay-per-use | Excellent | Cloud (model-provider-visible) |
 | `claudemax` | Run claude-max-api-proxy on localhost:3457 | Claude Max subscription | Excellent | Cloud (Anthropic-visible) |
-| `tinfoil` | `pip install 'meetscribe-offline[tee]'`, set `TINFOIL_API_KEY` (or drop a key file at `~/models/tinfoil/tinfoil.txt`) | ~$0.009/meeting | Excellent (DeepSeek V4 Pro) | **Hardware-attested TEE — prompts not visible to provider/operator** |
+| `tinfoil` | `pip install 'millet-pipeline[tee]'`, set `TINFOIL_API_KEY` (or drop a key file at `~/models/tinfoil/tinfoil.txt`) | ~$0.009/meeting | Excellent (DeepSeek V4 Pro) | **Hardware-attested TEE — prompts not visible to provider/operator** |
 | `openai` | Set `MEETSCRIBE_OPENAI_BASE_URL` | Varies | Varies | Depends on endpoint |
 
 The `openai` backend works with any OpenAI-compatible API — Lemonade, LiteLLM,
@@ -466,7 +480,7 @@ V4 Pro.
 
 ```bash
 # Use OpenRouter
-meet run --summary-backend openrouter --summary-model anthropic/claude-sonnet-4.6
+millet run --summary-backend openrouter --summary-model anthropic/claude-sonnet-4.6
 
 # Use any OpenAI-compatible endpoint
 export MEETSCRIBE_SUMMARY_BACKEND=openai
@@ -479,7 +493,7 @@ export MEETSCRIBE_SUMMARY_BACKEND=openrouter
 export MEETSCRIBE_SUMMARY_MODEL=anthropic/claude-sonnet-4.6
 ```
 
-If the configured backend is unavailable, meetscribe automatically tries the
+If the configured backend is unavailable, millet automatically tries the
 next one in the fallback chain: **claudemax → tinfoil → openrouter → ollama**.
 The `openai` backend is opt-in only and never participates in the fallback
 chain.
@@ -505,11 +519,11 @@ pair.  Set it via `--summary-preset` on `transcribe`, `run`, `label`,
 
 ```bash
 # Quick check of which preset is in effect
-meet transcribe ~/meet-recordings/today/today.wav --summary-preset confidential
+millet transcribe ~/millet-recordings/today/today.wav --summary-preset confidential
 
 # Or set per-session via env
 export MEETSCRIBE_SUMMARY_PRESET=high-quality
-meet run
+millet run
 ```
 
 When a preset is set, `--summary-backend` and `--summary-model` overrides
@@ -518,7 +532,7 @@ are honored within that preset (e.g. `--summary-preset confidential
 
 ### Two-pass local summarization
 
-When the **ollama** backend is selected (the default), meetscribe runs two
+When the **ollama** backend is selected (the default), millet runs two
 LLM calls instead of one:
 
 1. **Pass 1 (extraction)** — pulls topics, actions, decisions, and open
@@ -537,7 +551,7 @@ already produce well-structured output in one shot.
 To opt out and use the previous single-pass behavior:
 
 ```bash
-meet run --ollama-singlepass
+millet run --ollama-singlepass
 # Or via environment:
 export MEETSCRIBE_OLLAMA_SINGLEPASS=1
 ```
@@ -557,16 +571,16 @@ your preferred model. No Python changes needed.
 
 ## Voiceprint speaker recognition
 
-meetscribe can automatically identify speakers across meetings using voice
+millet can automatically identify speakers across meetings using voice
 embeddings. After you label speakers in one meeting, their voice profiles are
 stored and matched against future recordings.
 
 ```bash
 # Build profiles from already-labeled sessions
-meet enroll ~/meet-recordings/meeting-20260330-*
+millet enroll ~/millet-recordings/meeting-20260330-*
 
 # Auto-label speakers in future meetings using voice profiles
-meet label --auto ~/meet-recordings/meeting-20260401-093000
+millet label --auto ~/millet-recordings/meeting-20260401-093000
 ```
 
 Profiles are stored in `~/.config/meet/speaker_profiles.json` and improve
@@ -578,14 +592,14 @@ Push meeting artifacts to a Git repository on a configurable schedule.
 
 ```bash
 # Create an example config
-meet sync --init-config
+millet sync --init-config
 # Edit ~/.config/meet/sync_config.json with your repo URL and schedule
 
 # Push a session manually
-meet sync ~/meet-recordings/meeting-20260331-110038_STANDUP
+millet sync ~/millet-recordings/meeting-20260331-110038_STANDUP
 
 # View configured schedule
-meet sync --list-schedule
+millet sync --list-schedule
 ```
 
 When the GUI detects a matching scheduled meeting, it prompts for confirmation
@@ -598,16 +612,16 @@ are present before offering to sync.
 
 ## Multilingual support
 
-meetscribe auto-detects the spoken language by default (Whisper large-v3-turbo
+millet auto-detects the spoken language by default (Whisper large-v3-turbo
 supports 99 languages). You can also set it explicitly:
 
 ```bash
-meet run --language de       # German
-meet run --language tr       # Turkish
-meet run --language fr       # French
-meet run --language es       # Spanish
-meet run --language fa       # Farsi (Persian)
-meet run --language auto     # Auto-detect (default)
+millet run --language de       # German
+millet run --language tr       # Turkish
+millet run --language fr       # French
+millet run --language es       # Spanish
+millet run --language fa       # Farsi (Persian)
+millet run --language auto     # Auto-detect (default)
 ```
 
 ### How it works
@@ -642,7 +656,7 @@ RTL dependencies:
 ```bash
 pip install arabic-reshaper python-bidi
 # Or with the optional extra:
-pip install "meetscribe-offline[rtl]"
+pip install "millet-pipeline[rtl]"
 ```
 
 Without these libraries, Farsi text will appear in the PDF but glyphs may not
@@ -650,11 +664,11 @@ be joined correctly and reading order may be wrong.
 
 ## Virtual sink mode
 
-By default, `meet record` captures all system audio (including notification
+By default, `millet record` captures all system audio (including notification
 sounds, music, etc.). For cleaner recordings, use `--virtual-sink`:
 
 ```bash
-meet record --virtual-sink
+millet record --virtual-sink
 ```
 
 This creates an isolated audio sink. Route your meeting app's audio to it:
@@ -713,7 +727,7 @@ page-numbered PDF document.
 
 The pyannote diarization model requires CUDA NVRTC for JIT compilation. If your
 CUDA driver version doesn't match the installed libnvrtc-builtins version,
-meetscribe automatically creates a compatibility symlink. This happens
+millet automatically creates a compatibility symlink. This happens
 transparently on first use.
 
 If you still see NVRTC errors:
@@ -725,9 +739,9 @@ export LD_LIBRARY_PATH=$HOME/.local/lib/cuda:$LD_LIBRARY_PATH
 ## Limitations
 
 - Overlapping speech is not handled well (Whisper limitation)
-- Speaker labels default to role-based (YOU, REMOTE_1, REMOTE_2) — use `meet label` or the GUI dialog to assign real names
+- Speaker labels default to role-based (YOU, REMOTE_1, REMOTE_2) — use `millet label` or the GUI dialog to assign real names
 - Diarization accuracy varies with audio quality and number of speakers
-- Audio capture (`meet record`, `meet run`) requires Linux with PulseAudio
+- Audio capture (`millet record`, `millet run`) requires Linux with PulseAudio
   or PipeWire. Transcription, labeling, summarization, and sync work on both
   Linux (CUDA) and macOS Apple Silicon (MLX Whisper + MPS) as of v0.6.0.
 - Windows is not supported.
@@ -740,20 +754,20 @@ export LD_LIBRARY_PATH=$HOME/.local/lib/cuda:$LD_LIBRARY_PATH
 
 ## FAQ
 
-**Is there a GUI?** Yes — run `meet gui` for a small always-on-top GTK3
+**Is there a GUI?** Yes — run `millet gui` for a small always-on-top GTK3
 widget with Record/Stop, live timer, status indicator, and one-click
 access to the resulting PDF and session folder. See
 [Launch the GUI widget](#launch-the-gui-widget) for details.
 
 **Does it work on Windows / macOS?** System-audio recording requires Linux
-(PulseAudio / PipeWire). The post-capture pipeline (`meet transcribe`,
-`meet label`, `meet sync`, etc.) works on macOS Apple Silicon as of v0.6.0
-— install with `pip install 'meetscribe-offline[mlx]'`. Windows is not
+(PulseAudio / PipeWire). The post-capture pipeline (`millet transcribe`,
+`millet label`, `millet sync`, etc.) works on macOS Apple Silicon as of v0.6.0
+— install with `pip install 'millet-pipeline[mlx]'`. Windows is not
 supported.
 
 **Can I run a Mac as a transcription server?** Yes — see
 [vezir](https://github.com/pretyflaco/vezir), the team-scale wrapper around
-meetscribe. A Mac can act as the GPU server with Linux laptops or the
+millet. A Mac can act as the GPU server with Linux laptops or the
 [Android client](https://github.com/pretyflaco/vezir-android) providing
 the audio.
 
@@ -764,8 +778,8 @@ See [VRAM usage](#vram-usage).
 ## Contributing
 
 ```bash
-git clone https://github.com/pretyflaco/meetscribe
-cd meetscribe
+git clone https://github.com/pretyflaco/millet
+cd millet
 pip install -e .[dev]
 /usr/bin/python3 -m pytest tests/
 ```

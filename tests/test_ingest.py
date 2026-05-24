@@ -7,8 +7,8 @@ import json
 import pytest
 from click.testing import CliRunner
 
-from meet.cli import ingest
-from meet.summarize import MeetingSummary
+from millet.cli import ingest
+from millet.summarize import MeetingSummary
 
 
 def _fake_summary(markdown: str = "## Meeting Overview\nHi.", *, with_data: bool = True) -> MeetingSummary:
@@ -39,7 +39,7 @@ def patched_summarize(monkeypatch):
         return _fake_summary()
 
     # Patch where _ingest_one_session imports it.
-    import meet.summarize as sm
+    import millet.summarize as sm
 
     monkeypatch.setattr(sm, "summarize", fake_do_summarize)
     return calls
@@ -48,7 +48,7 @@ def patched_summarize(monkeypatch):
 @pytest.fixture
 def patched_no_pdf(monkeypatch):
     """Stub PDF generation so we don't depend on reportlab + WAV in unit tests."""
-    import meet.pdf as pdf_mod
+    import millet.pdf as pdf_mod
 
     monkeypatch.setattr(pdf_mod, "generate_pdf", lambda *a, **kw: None)
 
@@ -56,7 +56,7 @@ def patched_no_pdf(monkeypatch):
 @pytest.fixture
 def patched_gpu(monkeypatch):
     """Stub the GPU helper so the ollama backend default doesn't try to reach Ollama."""
-    import meet.transcribe as tx
+    import millet.transcribe as tx
 
     monkeypatch.setattr(tx, "ensure_gpu_available", lambda: None)
 
@@ -163,7 +163,7 @@ class TestIngestFailures:
     def test_summarizer_failure_is_reported(
         self, session_dir, monkeypatch, patched_no_pdf, patched_gpu
     ):
-        import meet.summarize as sm
+        import millet.summarize as sm
 
         def boom(*a, **kw):
             raise RuntimeError("backend down")
@@ -191,7 +191,7 @@ class TestIngestFailures:
 def test_no_pdf_skips_pdf_generation(
     session_dir, patched_summarize, monkeypatch, patched_gpu
 ):
-    import meet.pdf as pdf_mod
+    import millet.pdf as pdf_mod
 
     pdf_calls: list = []
 
