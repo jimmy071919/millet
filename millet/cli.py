@@ -1000,9 +1000,17 @@ def translate(session_dir, target_lang, summary_model):
     "--ollama-singlepass",
     is_flag=True,
     default=False,
-    help="Use the legacy single-pass Ollama flow instead of the default two-pass (extract+format) flow. The two-pass flow is more accurate on local 20B-class models but adds one extra LLM call. Also configurable via MEETSCRIBE_OLLAMA_SINGLEPASS=1.",
+    help="Use the legacy single-pass Ollama flow instead of the default two-pass (extract+format) flow. The two-pass flow is more accurate on local 20B-class models but adds one extra LLM call. Also configurable via MILLET_OLLAMA_SINGLEPASS=1.",
 )
-def label(session_dir, no_audio, no_summary, auto, summary_preset, summary_backend, summary_model, ollama_singlepass):
+@click.option(
+    "--team",
+    type=str,
+    default=None,
+    help="Use this team's voiceprint DB (~/.config/meet/<team>/"
+         "speaker_profiles.json) for auto-label matching and profile "
+         "updates, instead of the global DB.",
+)
+def label(session_dir, no_audio, no_summary, auto, summary_preset, summary_backend, summary_model, ollama_singlepass, team):
     """Assign real names to speakers in a transcribed session.
 
     \b
@@ -1035,6 +1043,10 @@ def label(session_dir, no_audio, no_summary, auto, summary_preset, summary_backe
         _load_transcript,
         _detect_speaker_channels,
     )
+    from millet import paths
+
+    # Resolve the team's voiceprint DB once; None => global default.
+    team_profiles_path = paths.profiles_path(team) if team else None
 
     session_path = Path(session_dir)
     files = _find_session_files(session_path)
@@ -1081,9 +1093,9 @@ def label(session_dir, no_audio, no_summary, auto, summary_preset, summary_backe
         try:
             from millet.voiceprint import identify_speakers, load_profiles
 
-            profiles = load_profiles()
+            profiles = load_profiles(profiles_path=team_profiles_path)
             if not profiles:
-                click.echo("  No speaker profiles found. Run 'meet enroll' first.")
+                click.echo("  No speaker profiles found. Run 'millet enroll' first.")
                 click.echo("  Falling back to interactive labeling.")
                 click.echo()
             else:
@@ -1093,6 +1105,7 @@ def label(session_dir, no_audio, no_summary, auto, summary_preset, summary_backe
                     transcript.segments,
                     transcript.speakers,
                     channel_map,
+                    profiles_path=team_profiles_path,
                 )
                 if auto_matches:
                     click.echo(
@@ -1269,6 +1282,7 @@ def label(session_dir, no_audio, no_summary, auto, summary_preset, summary_backe
                     transcript.segments,
                     profile_labels,
                     channel_map,
+                    profiles_path=team_profiles_path,
                 )
                 click.echo("  Voice profiles updated.")
             except Exception as exc:
@@ -1284,28 +1298,42 @@ def label(session_dir, no_audio, no_summary, auto, summary_preset, summary_backe
     default=False,
     help="List enrolled speaker profiles and exit",
 )
-def enroll(session_dirs, list_profiles):
+@click.option(
+    "--team",
+    type=str,
+    default=None,
+    help="Enroll into this team's voiceprint DB "
+         "(~/.config/meet/<team>/speaker_profiles.json) instead of the "
+         "global one.",
+)
+def enroll(session_dirs, list_profiles, team):
     """Enroll speaker voice profiles from labeled session directories.
 
     Extracts voice embeddings from sessions that already have speaker labels
-    (set via 'meet label') and stores them in ~/.config/meet/speaker_profiles.json.
+    (set via 'millet label') and stores them in ~/.config/meet/speaker_profiles.json.
     Future meetings will automatically recognize these speakers.
 
     \b
     Examples:
-        meet enroll ~/meet-recordings/meeting-20260330-170216_WeeklySync
-        meet enroll ~/meet-recordings/meeting-20260330-*
-        meet enroll --list
+        millet enroll ~/meet-recordings/meeting-20260330-170216_WeeklySync
+        millet enroll ~/meet-recordings/meeting-20260330-*
+        millet enroll --list
+        millet enroll --team blink ~/meet-recordings/blink/meeting-*
     """
-    from millet.voiceprint import enroll_session, load_profiles, PROFILES_PATH
+    from millet import paths
+    from millet.voiceprint import enroll_session, load_profiles
+
+    # Resolve the team's DB path once; None => global default.
+    team_profiles_path = paths.profiles_path(team) if team else None
+    display_path = team_profiles_path or paths.profiles_path()
 
     if list_profiles:
-        profiles = load_profiles()
+        profiles = load_profiles(profiles_path=team_profiles_path)
         if not profiles:
             click.echo("No speaker profiles enrolled yet.")
-            click.echo("  Run: meet enroll <session_dir>")
+            click.echo("  Run: millet enroll <session_dir>")
             return
-        click.echo(f"Enrolled speaker profiles ({PROFILES_PATH}):")
+        click.echo(f"Enrolled speaker profiles ({display_path}):")
         click.echo()
         click.echo(f"  {'Name':<20} {'Sessions'}")
         click.echo(f"  {'----':<20} {'--------'}")
@@ -1329,6 +1357,7 @@ def enroll(session_dirs, list_profiles):
             status = enroll_session(
                 session_path,
                 progress_callback=lambda msg: click.echo(msg),
+                profiles_path=team_profiles_path,
             )
         except (FileNotFoundError, ValueError) as exc:
             click.echo(f"  Skipped: {exc}", err=True)
@@ -1343,7 +1372,7 @@ def enroll(session_dirs, list_profiles):
         click.echo()
 
     # Final summary
-    profiles = load_profiles()
+    profiles = load_profiles(profiles_path=team_profiles_path)
     click.echo(f"Profile database now contains {len(profiles)} speaker(s):")
     for name, p in sorted(profiles.items()):
         click.echo(f"  {name} ({p.n_sessions} session(s))")
@@ -1375,7 +1404,15 @@ def enroll(session_dirs, list_profiles):
     default=False,
     help="Create an example sync config and exit",
 )
-def sync(session_dirs, force, meeting_type, list_schedule, init_config):
+@click.option(
+    "--team",
+    type=str,
+    default=None,
+    help="Scope sync to a team: use ~/.config/meet/<team>/sync_config.json "
+         "and a team-namespaced repo clone. Lets one scribe sync different "
+         "teams to different repos.",
+)
+def sync(session_dirs, force, meeting_type, list_schedule, init_config, team):
     """Sync meeting artifacts to a configured Git repository.
 
     Detects whether each session matches a configured meeting schedule and
@@ -1384,38 +1421,46 @@ def sync(session_dirs, force, meeting_type, list_schedule, init_config):
 
     \b
     Setup:
-        meet sync --init-config          # create example config
+        millet sync --init-config        # create example config
         # edit ~/.config/meet/sync_config.json with your repo URL and schedule
 
     \b
+    Per-team setup:
+        millet sync --team blink --init-config
+        # edit ~/.config/meet/blink/sync_config.json
+
+    \b
     Examples:
-        meet sync ~/meet-recordings/meeting-20260330-170216_WeeklySync
-        meet sync --force --meeting-type weekly-sync ~/meet-recordings/meeting-20260330-*
-        meet sync --list-schedule
+        millet sync ~/meet-recordings/meeting-20260330-170216_WeeklySync
+        millet sync --force --meeting-type weekly-sync ~/meet-recordings/meeting-20260330-*
+        millet sync --list-schedule
+        millet sync --team blink ~/meet-recordings/blink/meeting-*
     """
     from millet.sync import (
+        _resolve_sync_config_path,
         detect_meeting_type,
         sync_session,
         load_sync_config,
         save_sync_config,
         is_sync_configured,
         MeetingMatch,
-        SYNC_CONFIG_PATH,
         EXAMPLE_CONFIG,
     )
 
+    config_path = _resolve_sync_config_path(team)
+
     if init_config:
-        if SYNC_CONFIG_PATH.exists():
-            click.echo(f"Config already exists: {SYNC_CONFIG_PATH}")
+        if config_path.exists():
+            click.echo(f"Config already exists: {config_path}")
             click.echo("Edit it manually or delete it to regenerate.")
         else:
-            save_sync_config(EXAMPLE_CONFIG)
-            click.echo(f"Example config created: {SYNC_CONFIG_PATH}")
+            save_sync_config(EXAMPLE_CONFIG, team)
+            click.echo(f"Example config created: {config_path}")
             click.echo("Edit it with your repo URL and meeting schedule.")
         return
 
     if list_schedule:
-        config = load_sync_config()
+        config = load_sync_config(team)
         repo_url = config.get("repo_url", "")
         day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
@@ -1428,7 +1473,7 @@ def sync(session_dirs, force, meeting_type, list_schedule, init_config):
         meetings = config.get("meetings", [])
         if not meetings:
             click.echo("No meetings configured.")
-            click.echo(f"Edit {SYNC_CONFIG_PATH} to add your schedule.")
+            click.echo(f"Edit {config_path} to add your schedule.")
         else:
             click.echo("Meeting schedule:")
             click.echo()
@@ -1447,9 +1492,9 @@ def sync(session_dirs, force, meeting_type, list_schedule, init_config):
         click.echo("Error: provide at least one session directory", err=True)
         raise SystemExit(1)
 
-    if not is_sync_configured():
+    if not is_sync_configured(team):
         click.echo(
-            "Error: sync not configured. Run 'meet sync --init-config' to get started.",
+            "Error: sync not configured. Run 'millet sync --init-config' to get started.",
             err=True,
         )
         raise SystemExit(1)
@@ -1461,7 +1506,7 @@ def sync(session_dirs, force, meeting_type, list_schedule, init_config):
         if meeting_type:
             match = MeetingMatch(name=meeting_type, folder=meeting_type)
         else:
-            match = detect_meeting_type(session_path)
+            match = detect_meeting_type(session_path, team=team)
 
         if match is None and not force:
             click.echo(
@@ -1480,6 +1525,7 @@ def sync(session_dirs, force, meeting_type, list_schedule, init_config):
                 session_path,
                 match,
                 progress_callback=lambda msg: click.echo(msg),
+                team=team,
             )
             click.echo(f"  Done: {len(files)} file(s) pushed as {match.folder}/")
         except Exception as exc:

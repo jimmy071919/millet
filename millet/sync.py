@@ -27,6 +27,27 @@ SYNC_CONFIG_PATH = Path.home() / ".config" / "meet" / "sync_config.json"
 CLONE_BASE_DIR = Path.home() / ".local" / "share" / "meet"
 MEETINGS_SUBDIR = "meetings"
 
+
+def _resolve_sync_config_path(
+    team: str | None = None,
+    config_path: Path | None = None,
+) -> Path:
+    """Resolve which sync_config.json to use.
+
+    Precedence:
+      1. explicit ``config_path`` (operator/embedder override).
+      2. ``team`` → ``~/.config/meet/<team>/sync_config.json`` via
+         :mod:`millet.paths`.  Each team gets its own repo target — this
+         is what lets one scribe sync different teams to different repos.
+      3. the legacy global ``SYNC_CONFIG_PATH``.
+    """
+    if config_path is not None:
+        return config_path
+    if team:
+        from . import paths
+        return paths.sync_config_path(team)
+    return SYNC_CONFIG_PATH
+
 # ─── Files to push (by suffix) ───────────────────────────────────────────────
 
 PUSH_SUFFIXES = {".md", ".txt", ".pdf", ".srt", ".json"}
@@ -66,28 +87,44 @@ EXAMPLE_CONFIG: dict[str, Any] = {
 }
 
 
-def load_sync_config() -> dict[str, Any]:
-    """Load sync config from disk. Returns empty defaults if not found."""
-    if not SYNC_CONFIG_PATH.exists():
+def load_sync_config(
+    team: str | None = None,
+    config_path: Path | None = None,
+) -> dict[str, Any]:
+    """Load sync config from disk. Returns empty defaults if not found.
+
+    When ``team`` is given the per-team config is read; otherwise the
+    legacy global file.  ``config_path`` overrides both.
+    """
+    p = _resolve_sync_config_path(team, config_path)
+    if not p.exists():
         return DEFAULT_CONFIG
     try:
-        return json.loads(SYNC_CONFIG_PATH.read_text(encoding="utf-8"))
+        return json.loads(p.read_text(encoding="utf-8"))
     except Exception as exc:
         log.warning("Could not load sync config: %s — using defaults", exc)
         return DEFAULT_CONFIG
 
 
-def save_sync_config(config: dict[str, Any]) -> None:
-    """Save sync config to disk."""
-    SYNC_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    SYNC_CONFIG_PATH.write_text(
+def save_sync_config(
+    config: dict[str, Any],
+    team: str | None = None,
+    config_path: Path | None = None,
+) -> None:
+    """Save sync config to disk (per-team when ``team`` is given)."""
+    p = _resolve_sync_config_path(team, config_path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(
         json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8"
     )
 
 
-def is_sync_configured() -> bool:
-    """Return True if a repo_url is configured for sync."""
-    config = load_sync_config()
+def is_sync_configured(
+    team: str | None = None,
+    config_path: Path | None = None,
+) -> bool:
+    """Return True if a repo_url is configured for sync (for this team)."""
+    config = load_sync_config(team, config_path)
     return bool(config.get("repo_url"))
 
 
@@ -119,7 +156,9 @@ class SyncCandidate:
     team_members_found: list[str]  # names of recognized team members in this meeting
 
 
-def check_sync_candidate(session_dir: Path) -> SyncCandidate | None:
+def check_sync_candidate(
+    session_dir: Path, team: str | None = None
+) -> SyncCandidate | None:
     """Check whether a session should be offered for sync.
 
     Passes two gates:
@@ -128,11 +167,11 @@ def check_sync_candidate(session_dir: Path) -> SyncCandidate | None:
 
     Returns a SyncCandidate if both pass, None otherwise.
     """
-    match = detect_meeting_type(session_dir)
+    match = detect_meeting_type(session_dir, team=team)
     if match is None:
         return None
 
-    config = load_sync_config()
+    config = load_sync_config(team)
     team_members = {m.lower() for m in config.get("team_members", [])}
     min_required = config.get("min_team_members", 2)
 
@@ -167,7 +206,9 @@ def check_sync_candidate(session_dir: Path) -> SyncCandidate | None:
     return SyncCandidate(match=match, team_members_found=found)
 
 
-def detect_meeting_type(session_dir: Path) -> MeetingMatch | None:
+def detect_meeting_type(
+    session_dir: Path, team: str | None = None
+) -> MeetingMatch | None:
     """Check if a session matches any configured scheduled meeting.
 
     Reads started_at from session.json and compares against the schedule.
@@ -198,7 +239,7 @@ def detect_meeting_type(session_dir: Path) -> MeetingMatch | None:
         log.debug("Could not parse session start time: %s", exc)
         return None
 
-    config = load_sync_config()
+    config = load_sync_config(team)
     weekday = started_at.weekday()  # 0=Monday
     hour = started_at.hour
     minute = started_at.minute
@@ -253,32 +294,46 @@ def _current_branch_ahead_count(repo: Path) -> int:
         return 0
 
 
-def _get_clone_dir() -> Path:
+def _clone_dir_for(repo_url: str, team: str | None) -> Path:
+    """Local clone dir for a repo, namespaced by team to avoid collisions.
+
+    Two teams can legitimately point at different repos that share a
+    name (``org-a/meetings`` vs ``org-b/meetings``); putting each team's
+    clones under ``<base>/<team>/`` keeps them from clobbering one
+    another.  Teamless (global) syncs keep the flat layout.
+    """
+    name = _repo_name_from_url(repo_url)
+    return (CLONE_BASE_DIR / team / name) if team else (CLONE_BASE_DIR / name)
+
+
+def _get_clone_dir(team: str | None = None) -> Path:
     """Return the local clone directory for the configured repo."""
-    config = load_sync_config()
+    config = load_sync_config(team)
     repo_url = config.get("repo_url", "")
     if not repo_url:
         raise RuntimeError(
             "No repo_url configured for sync. "
-            f"Set it in {SYNC_CONFIG_PATH} or run: meet sync --init-config"
+            f"Set it in {_resolve_sync_config_path(team)} or run: "
+            "meet sync --init-config"
         )
-    return CLONE_BASE_DIR / _repo_name_from_url(repo_url)
+    return _clone_dir_for(repo_url, team)
 
 
-def ensure_repo_cloned(progress_callback=None) -> Path:
+def ensure_repo_cloned(progress_callback=None, team: str | None = None) -> Path:
     """Ensure the configured repo is cloned locally. Clone if not present, pull if it is.
 
     Returns the path to the local clone.
     """
-    config = load_sync_config()
+    config = load_sync_config(team)
     repo_url = config.get("repo_url", "")
     if not repo_url:
         raise RuntimeError(
             "No repo_url configured for sync. "
-            f"Set it in {SYNC_CONFIG_PATH} or run: meet sync --init-config"
+            f"Set it in {_resolve_sync_config_path(team)} or run: "
+            "meet sync --init-config"
         )
 
-    clone_dir = CLONE_BASE_DIR / _repo_name_from_url(repo_url)
+    clone_dir = _clone_dir_for(repo_url, team)
 
     def _log(msg: str) -> None:
         if progress_callback:
@@ -363,13 +418,13 @@ def _date_from_session(session_dir: Path) -> str:
     return datetime.now().strftime("%Y-%m-%d")
 
 
-def _ensure_readme(meetings_dir: Path) -> None:
+def _ensure_readme(meetings_dir: Path, team: str | None = None) -> None:
     """Create meetings/README.md from the sync config if it doesn't exist."""
     readme = meetings_dir / "README.md"
     if readme.exists():
         return
 
-    config = load_sync_config()
+    config = load_sync_config(team)
     meetings = config.get("meetings", [])
     day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
@@ -407,6 +462,7 @@ def sync_session(
     session_dir: Path,
     meeting_type: MeetingMatch,
     progress_callback=None,
+    team: str | None = None,
 ) -> list[Path]:
     """Copy session files into the configured repo and push to GitHub.
 
@@ -428,7 +484,7 @@ def sync_session(
         else:
             log.info(msg)
 
-    repo = ensure_repo_cloned(progress_callback=progress_callback)
+    repo = ensure_repo_cloned(progress_callback=progress_callback, team=team)
 
     date_str = _date_from_session(session_dir)
     # Each meeting gets its own folder: date first so folders sort chronologically
@@ -436,7 +492,7 @@ def sync_session(
     target_dir.mkdir(parents=True, exist_ok=True)
 
     # Ensure README exists
-    _ensure_readme(repo / MEETINGS_SUBDIR)
+    _ensure_readme(repo / MEETINGS_SUBDIR, team=team)
 
     # Collect and copy files with descriptive names
     source_files = _collect_files(session_dir)
@@ -490,6 +546,7 @@ def sync_session(
 def maybe_sync_session(
     session_dir: Path,
     progress_callback=None,
+    team: str | None = None,
 ) -> MeetingMatch | None:
     """Detect, validate (team members), and sync a scheduled meeting.
 
@@ -498,10 +555,10 @@ def maybe_sync_session(
 
     Returns the MeetingMatch if synced, None if skipped.
     """
-    if not is_sync_configured():
+    if not is_sync_configured(team):
         return None
 
-    candidate = check_sync_candidate(session_dir)
+    candidate = check_sync_candidate(session_dir, team=team)
     if candidate is None:
         return None
 
@@ -511,7 +568,10 @@ def maybe_sync_session(
 
     _log(f"Scheduled meeting detected: {candidate.match.name} — syncing...")
     try:
-        sync_session(session_dir, candidate.match, progress_callback=progress_callback)
+        sync_session(
+            session_dir, candidate.match,
+            progress_callback=progress_callback, team=team,
+        )
     except Exception as exc:
         _log(f"Sync failed (meeting saved locally): {exc}")
         log.exception("Sync failed for %s", session_dir)

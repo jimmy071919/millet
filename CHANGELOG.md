@@ -1,5 +1,64 @@
 # Changelog
 
+## v0.9.1 — team-aware paths (`--team`) + millet env-var aliases
+
+Adds an optional team dimension so a scribe recording for multiple
+teams can keep voiceprints, sync config, and recordings separated
+locally, and introduces `MILLET_*` env-var names alongside the legacy
+`MEETSCRIBE_*` / `MEET_*` ones.  Fully back-compatible: with no
+`--team` flag and the old env vars, behavior is unchanged.
+
+### Added
+
+- **`millet.paths` module** — central, call-time path resolver with an
+  optional `team` argument:
+  - `profiles_path(team)` → `~/.config/meet/<team>/speaker_profiles.json`
+  - `sync_config_path(team)` → `~/.config/meet/<team>/sync_config.json`
+  - `recordings_dir(team)` → `~/meet-recordings/<team>/`
+  - Team slugs validated (`[a-z][a-z0-9-]{2,31}`) so a bad value can
+    never escape its directory.
+- **`--team <slug>` flag** on `millet sync`, `millet enroll`,
+  `millet label`.
+  - `sync --team` reads `~/.config/meet/<team>/sync_config.json` and
+    clones into a team-namespaced dir
+    (`~/.local/share/meet/<team>/<repo>/`), so two teams can sync to
+    different repos that share a name without colliding.
+  - `enroll`/`label --team` use the team's voiceprint DB for matching
+    and profile updates.
+- **`MILLET_*` environment variables** with one-release fallback to the
+  legacy names (one-time `DeprecationWarning` on legacy use), via
+  `millet.paths.getenv_renamed`:
+  - `MILLET_SUMMARY_BACKEND` ← `MEETSCRIBE_SUMMARY_BACKEND`
+  - `MILLET_SUMMARY_MODEL` ← `MEETSCRIBE_SUMMARY_MODEL`
+  - `MILLET_SUMMARY_PRESET` ← `MEETSCRIBE_SUMMARY_PRESET`
+  - `MILLET_OLLAMA_SINGLEPASS` ← `MEETSCRIBE_OLLAMA_SINGLEPASS`
+  - `MILLET_OPENAI_BASE_URL` ← `MEETSCRIBE_OPENAI_BASE_URL`
+  - `MILLET_OPENAI_API_KEY` ← `MEETSCRIBE_OPENAI_API_KEY`
+  - `MILLET_PROFILES_PATH` ← `MEET_PROFILES_PATH`
+  - `MILLET_CONFIG_DIR` ← `MEET_CONFIG_DIR`
+  - `MILLET_RECORDINGS_DIR` ← `MEET_RECORDINGS_DIR`
+
+### Changed
+
+- `millet.sync` config accessors and entry points
+  (`load_sync_config`, `save_sync_config`, `is_sync_configured`,
+  `detect_meeting_type`, `check_sync_candidate`, `sync_session`,
+  `maybe_sync_session`, `ensure_repo_cloned`) now accept an optional
+  `team` (and `config_path` override).  Teamless callers unaffected.
+- `millet.voiceprint._default_profiles_path` now delegates to
+  `millet.paths`.
+
+### Notes
+
+- On-disk paths remain `~/.config/meet/` and `~/meet-recordings/` (the
+  `meet` spelling); only the env-var names gained `MILLET_*` aliases.
+  Migrating the on-disk paths is deferred to a future release with a
+  data-move step.
+
+### Tests
+
+- `tests/test_paths.py` (NEW), `tests/test_sync_team.py` (NEW).
+
 ## v0.9.0 — 2026-05-24 — rename to `millet-pipeline`
 
 The package formerly known as `meetscribe-offline` is now

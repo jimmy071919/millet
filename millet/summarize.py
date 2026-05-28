@@ -295,12 +295,17 @@ USER_PROMPT_TEMPLATE_LANG = _load_user_prompt_template_lang()
 
 def _resolve_backend() -> str:
     """Resolve the default backend from env var or hardcoded default."""
-    return os.environ.get("MEETSCRIBE_SUMMARY_BACKEND", "ollama").lower()
+    from .paths import getenv_renamed
+    return getenv_renamed(
+        "MILLET_SUMMARY_BACKEND", "MEETSCRIBE_SUMMARY_BACKEND",
+        default="ollama",
+    ).lower()
 
 
 def _resolve_model(backend: str) -> str:
     """Resolve the default model for a backend from env var or hardcoded default."""
-    env_model = os.environ.get("MEETSCRIBE_SUMMARY_MODEL")
+    from .paths import getenv_renamed
+    env_model = getenv_renamed("MILLET_SUMMARY_MODEL", "MEETSCRIBE_SUMMARY_MODEL")
     if env_model:
         return env_model
     if backend == "openrouter":
@@ -316,7 +321,10 @@ def _resolve_model(backend: str) -> str:
 
 def _resolve_ollama_singlepass() -> bool:
     """Resolve the default for the ollama single-pass opt-out from the env var."""
-    raw = os.environ.get("MEETSCRIBE_OLLAMA_SINGLEPASS", "").strip().lower()
+    from .paths import getenv_renamed
+    raw = (getenv_renamed(
+        "MILLET_OLLAMA_SINGLEPASS", "MEETSCRIBE_OLLAMA_SINGLEPASS", default="",
+    ) or "").strip().lower()
     return raw in ("1", "true", "yes", "on")
 
 
@@ -344,7 +352,10 @@ class SummaryConfig:
     def __post_init__(self):
         # Resolve preset: explicit arg > env var > None
         if self.preset is None:
-            self.preset = os.environ.get("MEETSCRIBE_SUMMARY_PRESET")
+            from .paths import getenv_renamed
+            self.preset = getenv_renamed(
+                "MILLET_SUMMARY_PRESET", "MEETSCRIBE_SUMMARY_PRESET",
+            )
         if self.preset:
             self.preset = self.preset.lower().strip()
             if self.preset in SUMMARY_PRESETS:
@@ -526,7 +537,10 @@ def is_backend_available(config: SummaryConfig | None = None) -> bool:
     elif config.backend == "tinfoil":
         return bool(_resolve_tinfoil_api_key())
     elif config.backend == "openai":
-        return bool(os.environ.get("MEETSCRIBE_OPENAI_BASE_URL"))
+        from .paths import getenv_renamed
+        return bool(getenv_renamed(
+            "MILLET_OPENAI_BASE_URL", "MEETSCRIBE_OPENAI_BASE_URL",
+        ))
     else:
         return is_ollama_available(config.ollama_url)
 
@@ -922,14 +936,17 @@ def _summarize_openai(
     """
     import time
 
-    base_url = os.environ.get("MEETSCRIBE_OPENAI_BASE_URL")
+    from .paths import getenv_renamed
+    base_url = getenv_renamed("MILLET_OPENAI_BASE_URL", "MEETSCRIBE_OPENAI_BASE_URL")
     if not base_url:
         raise RuntimeError(
-            "MEETSCRIBE_OPENAI_BASE_URL environment variable is not set. "
+            "MILLET_OPENAI_BASE_URL environment variable is not set. "
             "Set it to the base URL of your OpenAI-compatible API."
         )
 
-    api_key = os.environ.get("MEETSCRIBE_OPENAI_API_KEY", "not-needed")
+    api_key = getenv_renamed(
+        "MILLET_OPENAI_API_KEY", "MEETSCRIBE_OPENAI_API_KEY", default="not-needed",
+    )
 
     from openai import OpenAI
 

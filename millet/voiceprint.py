@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from pathlib import Path
 from typing import NamedTuple
 
@@ -30,19 +29,19 @@ log = logging.getLogger(__name__)
 _DEFAULT_PROFILES_REL = Path(".config") / "meet" / "speaker_profiles.json"
 
 
-def _default_profiles_path() -> Path:
+def _default_profiles_path(team: str | None = None) -> Path:
     """Resolve the default profile DB path **at call time**.
 
-    Resolution order:
-      1. ``$MEET_PROFILES_PATH`` env var, if set and non-empty.
-      2. ``~/.config/meet/speaker_profiles.json`` (``Path.home()``
-         evaluated now, not at module-import time — so callers that
-         override ``$HOME`` between import and call get the right path).
+    Delegates to :mod:`millet.paths`, which centralizes resolution:
+      1. ``team`` given → ``~/.config/meet/<team>/speaker_profiles.json``.
+      2. ``$MILLET_PROFILES_PATH`` (or legacy ``$MEET_PROFILES_PATH``).
+      3. ``~/.config/meet/speaker_profiles.json``.
+
+    ``Path.home()`` / env vars are read now (not at import), so callers
+    that override them between import and call get the right path.
     """
-    env = os.environ.get("MEET_PROFILES_PATH", "")
-    if env:
-        return Path(env).expanduser()
-    return Path.home() / _DEFAULT_PROFILES_REL
+    from . import paths
+    return paths.profiles_path(team)
 
 
 def __getattr__(name: str):
