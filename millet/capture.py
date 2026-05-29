@@ -17,13 +17,13 @@ To get the full pipeline:
     pip install millet-pipeline
 """
 
-from meet_record.capture import *  # noqa: F401,F403
-from meet_record.capture import (  # noqa: F401  re-exported names
+from millet_record.capture import *  # noqa: F403
+from millet_record.capture import (  # noqa: F401  re-exported names
     DRAIN_SECONDS,
     RecordingSession,
-    create_session,
     check_prerequisites,
-    list_sources,
+    create_session,
     get_default_sink,
     get_default_source,
+    list_sources,
 )

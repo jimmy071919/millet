@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import patch
 
 import pytest
 
@@ -16,7 +15,6 @@ from millet.summarize import (
     _dispatch,
     _resolve_ollama_singlepass,
 )
-
 
 # ─── Env-var resolution ────────────────────────────────────────────────────
 

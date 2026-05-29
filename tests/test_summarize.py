@@ -1,9 +1,9 @@
-"""Tests for meet.summarize — system prompt construction."""
+"""Tests for millet.summarize — system prompt construction."""
 
 from __future__ import annotations
 
-from millet.summarize import _build_system_prompt
 from millet.languages import SECTION_HEADERS as _SECTION_HEADERS
+from millet.summarize import _build_system_prompt
 
 
 class TestBuildSystemPrompt:

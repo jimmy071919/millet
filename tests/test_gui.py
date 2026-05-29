@@ -1,6 +1,6 @@
 """GUI option-plumbing tests.
 
-These tests exercise ``meet.gui.launch`` and verify that the ASR/Torch options
+These tests exercise ``millet.gui.launch`` and verify that the ASR/Torch options
 flow into the transcribe_kwargs dict that ultimately constructs a
 ``TranscriptionConfig``.  The GTK main loop is never started.
 
@@ -20,7 +20,7 @@ def test_launch_threads_new_kwargs_into_transcribe_kwargs(monkeypatch):
     """``launch`` must pass asr_backend, torch_device, and mlx_model into
     ``MeetRecorderWindow``'s transcribe_kwargs dict so the next transcription
     picks them up via TranscriptionConfig."""
-    import meet.gui as gui_mod
+    import millet.gui as gui_mod
 
     captured: dict = {}
 
@@ -65,7 +65,7 @@ def test_launch_defaults_pass_none_through(monkeypatch):
     """When the caller doesn't override device/torch_device/mlx_model,
     ``launch`` should pass None so TranscriptionConfig.__post_init__ resolves
     them via platform detection."""
-    import meet.gui as gui_mod
+    import millet.gui as gui_mod
 
     captured: dict = {}
 
@@ -106,7 +106,7 @@ def test_launch_defaults_pass_none_through(monkeypatch):
 def test_launch_passes_explicit_language(monkeypatch):
     """``launch(language='en')`` must thread into transcribe_kwargs so the
     GUI Advanced panel dropdown can override Whisper's auto-detect."""
-    import meet.gui as gui_mod
+    import millet.gui as gui_mod
 
     captured: dict = {}
 

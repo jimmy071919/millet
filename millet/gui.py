@@ -50,7 +50,6 @@ from __future__ import annotations
 
 import logging
 import queue
-import signal
 import subprocess
 import threading
 import time
@@ -59,7 +58,7 @@ from pathlib import Path
 import gi
 
 gi.require_version("Gtk", "3.0")
-from gi.repository import Gtk, GLib, Gdk, Pango  # noqa: E402
+from gi.repository import Gdk, GLib, Gtk, Pango
 
 from millet.capture import DRAIN_SECONDS
 from millet.utils import fmt_elapsed, fmt_size
@@ -470,7 +469,7 @@ class MeetRecorderWindow(Gtk.Window):
 
     # ── Advanced settings panel ─────────────────────────────────────────
 
-    def _build_advanced_settings(self, parent_vbox: "Gtk.Box") -> None:
+    def _build_advanced_settings(self, parent_vbox: Gtk.Box) -> None:
         """Build a collapsible 'Advanced' panel for ASR backend / torch device /
         MLX model.  Selections are written back into ``self._transcribe_kwargs``
         so the next transcription picks them up."""
@@ -484,12 +483,12 @@ class MeetRecorderWindow(Gtk.Window):
         grid.set_margin_bottom(4)
 
         # Helpers ----------------------------------------------------------
-        def _label(text: str) -> "Gtk.Label":
+        def _label(text: str) -> Gtk.Label:
             lbl = Gtk.Label(label=text)
             lbl.set_halign(Gtk.Align.END)
             return lbl
 
-        def _combo(values: list[str], current: str | None) -> "Gtk.ComboBoxText":
+        def _combo(values: list[str], current: str | None) -> Gtk.ComboBoxText:
             combo = Gtk.ComboBoxText()
             for v in values:
                 combo.append_text(v)
@@ -633,7 +632,7 @@ class MeetRecorderWindow(Gtk.Window):
     def _on_label_apply(self, _widget):
         """User clicked 'Apply & Continue' on the speaker labeling dialog."""
         label_map = {}
-        for sp, entry in zip(self._label_speakers, self._label_entries):
+        for sp, entry in zip(self._label_speakers, self._label_entries, strict=False):
             new_name = entry.get_text().strip()
             if new_name and new_name != sp.id:
                 label_map[sp.id] = new_name
@@ -682,7 +681,7 @@ class MeetRecorderWindow(Gtk.Window):
         try:
             from millet.label import play_clip
 
-            proc = play_clip(clip_path)
+            play_clip(clip_path)
             # Don't block the UI — fire and forget
         except Exception:
             pass
@@ -701,11 +700,10 @@ class MeetRecorderWindow(Gtk.Window):
         if not self._label_audio_path or not confirmed_label_map:
             return
         try:
-            from millet.voiceprint import update_profiles_from_confirmed_labels
-
             # We need the original (pre-relabel) segments, stored on the transcript
             # that was passed to _do_label_speakers.  Retrieve from the saved JSON.
             from millet.label import _find_session_files, _load_transcript
+            from millet.voiceprint import update_profiles_from_confirmed_labels
 
             files = _find_session_files(self._label_audio_path.parent)
             transcript_json = files.get("json")
@@ -848,7 +846,7 @@ class MeetRecorderWindow(Gtk.Window):
     # ── Recording lifecycle ─────────────────────────────────────────────
 
     def _start_recording(self):
-        from millet.capture import create_session, check_prerequisites
+        from millet.capture import check_prerequisites, create_session
 
         issues = check_prerequisites()
         if issues:
@@ -995,7 +993,7 @@ class MeetRecorderWindow(Gtk.Window):
         """
         GLib.idle_add(self._set_bg_status, f"Transcribing: {session_name}...")
 
-        config, transcript = self._do_transcribe_bg(output, session_name)
+        _config, transcript = self._do_transcribe_bg(output, session_name)
         if transcript is None:
             return
 
@@ -1027,14 +1025,16 @@ class MeetRecorderWindow(Gtk.Window):
         Returns (config, transcript) on success, or (None, None) on failure.
         """
         from millet.transcribe import (
-            TranscriptionConfig,
-            transcribe as do_transcribe,
-            AlignmentModelMissing,
-            ensure_gpu_available,
-            check_alignment_model_cached,
-            ALIGNMENT_MODELS,
             _LANG_NAMES,
             _MODEL_SIZES,
+            ALIGNMENT_MODELS,
+            AlignmentModelMissing,
+            TranscriptionConfig,
+            check_alignment_model_cached,
+            ensure_gpu_available,
+        )
+        from millet.transcribe import (
+            transcribe as do_transcribe,
         )
 
         config = TranscriptionConfig(**self._transcribe_kwargs)
@@ -1189,9 +1189,11 @@ class MeetRecorderWindow(Gtk.Window):
             return transcript
 
         from millet.label import (
-            get_speakers as _get_speakers,
             find_session_files,
             relabel_transcript_in_memory,
+        )
+        from millet.label import (
+            get_speakers as _get_speakers,
         )
 
         try:
@@ -1204,8 +1206,8 @@ class MeetRecorderWindow(Gtk.Window):
 
                 # Build channel map: speaker_id -> 'mic' | 'system'
                 from millet.audio import (
-                    read_stereo_channels,
                     compute_speaker_channel_energy,
+                    read_stereo_channels,
                 )
 
                 channel_map: dict[str, str] = {}
@@ -1312,7 +1314,7 @@ class MeetRecorderWindow(Gtk.Window):
     def _do_sync_bg(self, output: Path, session_name: str) -> None:
         """Check for scheduled meeting, prompt for sync (deferred), then sync."""
         try:
-            from millet.sync import check_sync_candidate, sync_session, is_sync_configured
+            from millet.sync import check_sync_candidate, is_sync_configured, sync_session
 
             if not is_sync_configured():
                 return

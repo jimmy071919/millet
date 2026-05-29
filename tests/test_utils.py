@@ -1,7 +1,6 @@
-"""Tests for meet.utils — shared formatting utility functions."""
+"""Tests for millet.utils — shared formatting utility functions."""
 
-from millet.utils import fmt_elapsed, fmt_size, fmt_time, fmt_time_short, fmt_srt_time
-
+from millet.utils import fmt_elapsed, fmt_size, fmt_srt_time, fmt_time, fmt_time_short
 
 # ─── fmt_time (HH:MM:SS) ───────────────────────────────────────────────────
 

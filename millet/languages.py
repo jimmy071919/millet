@@ -3,11 +3,11 @@
 Re-exports all public names from `meet_record.languages`.
 """
 
-from meet_record.languages import *  # noqa: F401,F403
-from meet_record.languages import (  # noqa: F401  re-exported names
+from millet_record.languages import *  # noqa: F403
+from millet_record.languages import (  # noqa: F401  re-exported names
     LANG_NAMES,
-    RTL_LANGUAGES,
-    is_rtl,
-    SECTION_HEADERS,
     PDF_SECTIONS,
+    RTL_LANGUAGES,
+    SECTION_HEADERS,
+    is_rtl,
 )

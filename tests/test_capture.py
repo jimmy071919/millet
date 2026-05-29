@@ -1,8 +1,7 @@
-"""Tests for meet.capture — pause/resume functionality."""
+"""Tests for millet.capture — pause/resume functionality."""
 
 from __future__ import annotations
 
-import struct
 import wave
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -10,7 +9,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from millet.capture import RecordingSession, RecordingStatus
-
 
 # ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -80,7 +78,7 @@ class TestRecordingStatusPaused:
 
 
 class TestPauseResume:
-    @patch("meet.capture.subprocess.Popen", side_effect=_fake_popen)
+    @patch("millet.capture.subprocess.Popen", side_effect=_fake_popen)
     def test_pause_sets_paused_flag(self, mock_popen, tmp_path):
         session = _make_session(tmp_path)
 
@@ -97,7 +95,7 @@ class TestPauseResume:
 
         assert session._paused is True
 
-    @patch("meet.capture.subprocess.Popen", side_effect=_fake_popen)
+    @patch("millet.capture.subprocess.Popen", side_effect=_fake_popen)
     def test_pause_stops_ffmpeg(self, mock_popen, tmp_path):
         session = _make_session(tmp_path)
 
@@ -114,7 +112,7 @@ class TestPauseResume:
         # After pause, ffmpeg proc should be None (stopped)
         assert session._ffmpeg_proc is None
 
-    @patch("meet.capture.subprocess.Popen", side_effect=_fake_popen)
+    @patch("millet.capture.subprocess.Popen", side_effect=_fake_popen)
     def test_pause_when_already_paused_raises(self, mock_popen, tmp_path):
         session = _make_session(tmp_path)
         session._paused = True
@@ -122,7 +120,7 @@ class TestPauseResume:
         with pytest.raises(RuntimeError, match="already paused"):
             session.pause()
 
-    @patch("meet.capture.subprocess.Popen", side_effect=_fake_popen)
+    @patch("millet.capture.subprocess.Popen", side_effect=_fake_popen)
     def test_pause_when_failed_raises(self, mock_popen, tmp_path):
         session = _make_session(tmp_path)
         session._failed = True
@@ -130,7 +128,7 @@ class TestPauseResume:
         with pytest.raises(RuntimeError, match="failed"):
             session.pause()
 
-    @patch("meet.capture.subprocess.Popen", side_effect=_fake_popen)
+    @patch("millet.capture.subprocess.Popen", side_effect=_fake_popen)
     def test_resume_clears_paused_flag(self, mock_popen, tmp_path):
         session = _make_session(tmp_path)
         session._paused = True
@@ -148,7 +146,7 @@ class TestPauseResume:
 
         assert session._paused is False
 
-    @patch("meet.capture.subprocess.Popen", side_effect=_fake_popen)
+    @patch("millet.capture.subprocess.Popen", side_effect=_fake_popen)
     def test_resume_starts_new_chunk(self, mock_popen, tmp_path):
         session = _make_session(tmp_path)
         session._paused = True
@@ -171,7 +169,7 @@ class TestPauseResume:
         assert len(session._chunks) == 2
         assert session._chunks[1] == chunk1_path
 
-    @patch("meet.capture.subprocess.Popen", side_effect=_fake_popen)
+    @patch("millet.capture.subprocess.Popen", side_effect=_fake_popen)
     def test_resume_when_not_paused_raises(self, mock_popen, tmp_path):
         session = _make_session(tmp_path)
         session._paused = False
@@ -179,7 +177,7 @@ class TestPauseResume:
         with pytest.raises(RuntimeError, match="not paused"):
             session.resume()
 
-    @patch("meet.capture.subprocess.Popen", side_effect=_fake_popen)
+    @patch("millet.capture.subprocess.Popen", side_effect=_fake_popen)
     def test_status_reports_paused(self, mock_popen, tmp_path):
         session = _make_session(tmp_path)
 
@@ -199,7 +197,7 @@ class TestPauseResume:
         status = session.status()
         assert status.paused is True
 
-    @patch("meet.capture.subprocess.Popen", side_effect=_fake_popen)
+    @patch("millet.capture.subprocess.Popen", side_effect=_fake_popen)
     def test_status_elapsed_frozen_when_paused(self, mock_popen, tmp_path):
         """When paused, elapsed time comes from finalized chunk files and doesn't change."""
         session = _make_session(tmp_path)
@@ -218,7 +216,7 @@ class TestPauseResume:
         assert elapsed1 == elapsed2
         assert elapsed1 > 0  # Should have some duration from the chunk
 
-    @patch("meet.capture.subprocess.Popen", side_effect=_fake_popen)
+    @patch("millet.capture.subprocess.Popen", side_effect=_fake_popen)
     def test_stop_from_paused_state(self, mock_popen, tmp_path):
         """Stopping from paused state should work and produce output."""
         session = _make_session(tmp_path)

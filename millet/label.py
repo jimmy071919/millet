@@ -19,9 +19,8 @@ from typing import Any
 
 import numpy as np
 
-from millet.audio import read_stereo_channels, compute_speaker_channel_energy
+from millet.audio import compute_speaker_channel_energy, read_stereo_channels
 from millet.transcribe import Segment, Speaker, Transcript
-
 
 # ─── Data ───────────────────────────────────────────────────────────────────
 
@@ -391,8 +390,12 @@ def apply_labels(
         _log("Regenerating summary with updated speaker names...")
         try:
             from millet.summarize import (
-                summarize as do_summarize, SummaryConfig,
-                is_backend_available, _backend_not_available_message,
+                SummaryConfig,
+                _backend_not_available_message,
+                is_backend_available,
+            )
+            from millet.summarize import (
+                summarize as do_summarize,
             )
             from millet.transcribe import ensure_gpu_available
 

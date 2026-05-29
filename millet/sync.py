@@ -15,7 +15,7 @@ import logging
 import shutil
 import subprocess
 from dataclasses import dataclass
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -514,7 +514,7 @@ def sync_session(
 
     # Stage all copied files
     rel_paths = [str(p.relative_to(repo)) for p in copied]
-    _run(["git", "add"] + rel_paths, cwd=repo)
+    _run(["git", "add", *rel_paths], cwd=repo)
 
     # Check if there's anything to commit
     status = _run(["git", "status", "--porcelain"], cwd=repo)

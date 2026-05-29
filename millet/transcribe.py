@@ -18,9 +18,10 @@ import logging
 import os
 import subprocess
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -166,7 +167,7 @@ def _torch_device_available(device: str) -> bool | None:
     if device == "cpu":
         return True
     try:
-        import torch  # noqa: PLC0415  - lazy by design
+        import torch
     except ImportError:
         return None
     if device == "cuda":
@@ -231,7 +232,7 @@ _MODEL_SIZES: dict[str, str] = {
     "fa": "~1.2 GB",
 }
 
-from millet.languages import LANG_NAMES as _LANG_NAMES  # noqa: E402
+from millet.languages import LANG_NAMES as _LANG_NAMES
 
 MODEL_SIZES = _MODEL_SIZES  # public accessor
 
@@ -635,7 +636,8 @@ class Transcript:
         return files
 
 
-from millet.utils import fmt_time as _fmt_time, fmt_srt_time as _fmt_srt_time  # noqa: E402
+from millet.utils import fmt_srt_time as _fmt_srt_time
+from millet.utils import fmt_time as _fmt_time
 
 
 def _extract_mono(audio_file: Path, channel: int = 0) -> Path:
@@ -669,7 +671,7 @@ def _extract_mono(audio_file: Path, channel: int = 0) -> Path:
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        raise RuntimeError(f"Failed to extract channel {channel}: {result.stderr}")
+        raise RuntimeError(f"Failed to extract channel {channel}: {result.stderr}") from None
     return Path(tmp.name)
 
 
@@ -709,7 +711,7 @@ def _mixdown_to_mono(audio_file: Path) -> Path:
         ]
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
-            raise RuntimeError(f"Mono mixdown failed: {result.stderr}")
+            raise RuntimeError(f"Mono mixdown failed: {result.stderr}") from None
         return Path(tmp.name)
 
     # ── Read stereo WAV (only works for .wav files) ──
@@ -1319,7 +1321,7 @@ def _label_speakers_from_channels(
     Returns:
         Updated (segments, speakers) with relabeled speaker IDs.
     """
-    from millet.audio import read_stereo_channels, compute_speaker_channel_energy
+    from millet.audio import compute_speaker_channel_energy, read_stereo_channels
 
     if not speakers:
         return segments, speakers
@@ -1519,7 +1521,7 @@ def _is_stereo(audio_file: Path) -> bool:
 
 
 def post_process(
-    transcript: "Transcript",
+    transcript: Transcript,
     output_dir: Path,
     basename: str,
     *,
@@ -1564,7 +1566,8 @@ def post_process(
 
     if summarize:
         try:
-            from millet.summarize import summarize as do_summarize, SummaryConfig
+            from millet.summarize import SummaryConfig
+            from millet.summarize import summarize as do_summarize
 
             cfg_kwargs: dict = {}
             if summary_preset:

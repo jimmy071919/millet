@@ -1,5 +1,46 @@
 # Changelog
 
+## v0.10.0 — tech-debt sweep: import-bug fix, CI, ruff, cli.py split
+
+Code-health release.  No user-facing behavior change; minor bump because
+the internal `cli.py` module became a `cli/` package.
+
+### Fixed
+
+* **Latent clean-install crash**: `millet/{capture,audio,utils,languages}.py`
+  shims imported `from meet_record.*` (the pre-rename package).  On a
+  clean `pip install millet-pipeline` (which depends on `millet-record`,
+  providing `millet_record`) every shim raised
+  `ModuleNotFoundError: meet_record`.  It only worked where the legacy
+  `meetscribe-record` happened to be co-installed.  Now they import
+  `from millet_record.*`.  `voiceprint.py` likewise switched its lazy
+  `from meet.* import` to `from millet.*` (and dropped two unused
+  imports).  New `tests/test_shim_imports.py` guards against regression.
+
+### Changed
+
+* **`cli.py` (1929 lines) split into a `cli/` package**: one module per
+  command (`transcribe`, `run`, `download`, `translate`, `label`,
+  `enroll`, `sync`, `gui`, `ingest`) + a shared `cli/_helpers.py`, with
+  `cli/__init__.py` defining the `main` group and re-exporting every
+  command symbol so the `millet.subcommands` / `meet.subcommands` entry
+  points (`millet.cli:transcribe` etc.) keep resolving.
+* **CI fixed**: the workflow linted/tested dead `meet/` paths (package is
+  `millet/`) and installed `meetscribe-record` (old PyPI name).  Now
+  lints the full `millet/` + `tests/` tree, installs `millet-record`,
+  and runs the no-torch/no-GTK test suites.
+* **Ruff config added** (`[tool.ruff]`, mirroring vezir's
+  `E,F,W,I,B,UP,RUF` ruleset) and the tree cleaned up (≈120 findings:
+  unused imports, `raise ... from`, import sorting, etc.).
+* Legacy `meet.*` references in the test suite rewritten to `millet.*`
+  (recovered ~29 previously-erroring tests).
+
+### Notes
+
+* `test_gui.py` (needs GTK/`gi`) and the torch-device-detection cases in
+  `test_transcribe.py` / `test_cli.py` still require a GPU/display
+  environment; they are excluded from the CI no-torch run.
+
 ## v0.9.2 — resilient Tinfoil (confidential) summarization
 
 The `confidential` summary preset (Tinfoil TEE backend) could hard-fail

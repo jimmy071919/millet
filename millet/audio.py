@@ -3,10 +3,10 @@
 Re-exports all public names from `meet_record.audio`.
 """
 
-from meet_record.audio import *  # noqa: F401,F403
-from meet_record.audio import (  # noqa: F401  re-exported names
+from millet_record.audio import *  # noqa: F403
+from millet_record.audio import (  # noqa: F401  re-exported names
     StereoChannels,
-    read_stereo_channels,
     compress_audio,
     compute_speaker_channel_energy,
+    read_stereo_channels,
 )

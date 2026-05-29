@@ -1,4 +1,4 @@
-"""Tests for meet.transcribe — Transcript dataclass methods and speaker labeling."""
+"""Tests for millet.transcribe — Transcript dataclass methods and speaker labeling."""
 
 from __future__ import annotations
 
@@ -6,16 +6,20 @@ import json
 import logging
 import sys
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import numpy as np
 import pytest
 
-from unittest.mock import patch
-
-from millet.transcribe import Segment, Speaker, Transcript, TranscriptionConfig
-from millet.transcribe import _transcribe_asr, _transcribe_dual_channel
+from millet.transcribe import (
+    Segment,
+    Speaker,
+    Transcript,
+    TranscriptionConfig,
+    _transcribe_asr,
+    _transcribe_dual_channel,
+)
 from millet.transcribe import transcribe as do_transcribe
-
 
 # ─── Transcript.to_text() ──────────────────────────────────────────────────
 
@@ -189,8 +193,10 @@ class TestLabelSpeakersFromChannels:
 
     def test_no_mic_dominant_speaker_all_remote(self, tmp_path):
         """When no speaker has mic_ratio > 0.5, all should be labeled REMOTE."""
-        import numpy as np
         import wave as wave_mod
+
+        import numpy as np
+
         from millet.transcribe import _label_speakers_from_channels
 
         # Create a stereo WAV where system channel is always louder
@@ -233,8 +239,10 @@ class TestLabelSpeakersFromChannels:
         they are clearly the most mic-dominant.  The margin check (top
         candidate >0.1 above the average of others, with absolute >0.15)
         should still assign YOU in this case."""
-        import numpy as np
         import wave as wave_mod
+
+        import numpy as np
+
         from millet.transcribe import _label_speakers_from_channels
 
         sr = 16000
@@ -314,8 +322,10 @@ class TestLabelSpeakersFromChannels:
 
         See: meetscribe-record commit 7b4a6fd (M4.5), epic
         pretyflaco/meetscribe-record#1, M7 sign-off."""
-        import numpy as np
         import wave as wave_mod
+
+        import numpy as np
+
         from millet.transcribe import _label_speakers_from_channels
 
         sr = 16000
@@ -414,7 +424,7 @@ class TestTranscriptionConfig:
         # Pretend MPS is available (otherwise validation rejects mps on
         # non-Mac CI).
         monkeypatch.setattr(
-            "meet.transcribe._torch_device_available",
+            "millet.transcribe._torch_device_available",
             lambda d: True,
         )
         config = TranscriptionConfig(device="cpu", torch_device="mps")
@@ -427,7 +437,7 @@ class TestTranscriptionConfig:
         # name; full coverage lives in test_cuda_unavailable_falls_back_*.
         def fake_avail(d):
             return False if d == "cuda" else True
-        monkeypatch.setattr("meet.transcribe._torch_device_available", fake_avail)
+        monkeypatch.setattr("millet.transcribe._torch_device_available", fake_avail)
         config = TranscriptionConfig(device="cuda", torch_device="cuda")
         # Both 'device' and 'torch_device' fall back to cpu when cuda is
         # unavailable; compute_type downgrades because device flipped.
@@ -442,7 +452,7 @@ class TestTranscriptionConfig:
         # (compute_type only flips when *device* falls back).
         def fake_avail(d):
             return False if d == "mps" else True
-        monkeypatch.setattr("meet.transcribe._torch_device_available", fake_avail)
+        monkeypatch.setattr("millet.transcribe._torch_device_available", fake_avail)
         config = TranscriptionConfig(
             device="cpu", torch_device="mps", compute_type="float16"
         )
@@ -455,8 +465,8 @@ class TestTranscriptionConfig:
     def test_cuda_unavailable_logs_both_warnings(self, monkeypatch, caplog):
         def fake_avail(d):
             return False if d == "cuda" else True
-        monkeypatch.setattr("meet.transcribe._torch_device_available", fake_avail)
-        with caplog.at_level(logging.WARNING, logger="meet.transcribe"):
+        monkeypatch.setattr("millet.transcribe._torch_device_available", fake_avail)
+        with caplog.at_level(logging.WARNING, logger="millet.transcribe"):
             TranscriptionConfig(device="cuda", torch_device="cuda",
                                 compute_type="float16")
         messages = [r.getMessage() for r in caplog.records]
@@ -472,8 +482,8 @@ class TestTranscriptionConfig:
     ):
         def fake_avail(d):
             return False if d == "cuda" else True
-        monkeypatch.setattr("meet.transcribe._torch_device_available", fake_avail)
-        with caplog.at_level(logging.WARNING, logger="meet.transcribe"):
+        monkeypatch.setattr("millet.transcribe._torch_device_available", fake_avail)
+        with caplog.at_level(logging.WARNING, logger="millet.transcribe"):
             config = TranscriptionConfig(device="cuda", torch_device="cuda",
                                          compute_type="int8")
         assert config.compute_type == "int8"
@@ -485,7 +495,7 @@ class TestTranscriptionConfig:
         # as a fallback (guards _load_whisperx_asr_model's "(forced)" vs
         # "(fallback — no GPU)" annotation).
         monkeypatch.setattr(
-            "meet.transcribe._torch_device_available", lambda d: True
+            "millet.transcribe._torch_device_available", lambda d: True
         )
         config = TranscriptionConfig(device="cpu", torch_device="cpu",
                                      compute_type="int8")
@@ -495,7 +505,7 @@ class TestTranscriptionConfig:
         # When torch is not installed, the helper returns None; validation
         # must not raise.  This preserves the invariant that the package is
         # importable / configurable without torch.
-        monkeypatch.setattr("meet.transcribe._torch_device_available", lambda d: None)
+        monkeypatch.setattr("millet.transcribe._torch_device_available", lambda d: None)
         # cuda would normally fail validation — but with torch missing, this
         # should construct silently.
         config = TranscriptionConfig(device="cuda", torch_device="cuda")
@@ -503,58 +513,58 @@ class TestTranscriptionConfig:
         assert config.torch_device == "cuda"
 
     def test_device_defaults_to_cuda_on_linux(self, monkeypatch):
-        monkeypatch.setattr("meet.transcribe._apple_silicon", lambda: False)
+        monkeypatch.setattr("millet.transcribe._apple_silicon", lambda: False)
         # Stub validation (#7) so 'cuda' passes regardless of host GPU.
         monkeypatch.setattr(
-            "meet.transcribe._torch_device_available", lambda d: True
+            "millet.transcribe._torch_device_available", lambda d: True
         )
         config = TranscriptionConfig()
         assert config.device == "cuda"
         assert config.torch_device == "cuda"
 
     def test_device_defaults_to_cpu_with_mps_on_apple_silicon(self, monkeypatch):
-        monkeypatch.setattr("meet.transcribe._apple_silicon", lambda: True)
-        monkeypatch.setattr("meet.transcribe._mps_available", lambda: True)
+        monkeypatch.setattr("millet.transcribe._apple_silicon", lambda: True)
+        monkeypatch.setattr("millet.transcribe._mps_available", lambda: True)
         # Disable MLX auto-selection to keep this test focused on device defaults.
-        monkeypatch.setattr("meet.transcribe._mlx_available", lambda: False)
+        monkeypatch.setattr("millet.transcribe._mlx_available", lambda: False)
         # _mps_available is the platform-default helper; the device-validation
         # helper (_torch_device_available) is independent.  Stub both so the
         # config picks 'mps' as the default AND passes validation under #7.
         monkeypatch.setattr(
-            "meet.transcribe._torch_device_available", lambda d: True
+            "millet.transcribe._torch_device_available", lambda d: True
         )
         config = TranscriptionConfig()
         assert config.device == "cpu"
         assert config.torch_device == "mps"
 
     def test_apple_silicon_without_mps_falls_back_to_cpu_torch(self, monkeypatch):
-        monkeypatch.setattr("meet.transcribe._apple_silicon", lambda: True)
-        monkeypatch.setattr("meet.transcribe._mps_available", lambda: False)
-        monkeypatch.setattr("meet.transcribe._mlx_available", lambda: False)
+        monkeypatch.setattr("millet.transcribe._apple_silicon", lambda: True)
+        monkeypatch.setattr("millet.transcribe._mps_available", lambda: False)
+        monkeypatch.setattr("millet.transcribe._mlx_available", lambda: False)
         config = TranscriptionConfig()
         assert config.device == "cpu"
         assert config.torch_device == "cpu"
 
     def test_explicit_device_overrides_apple_silicon_default(self, monkeypatch):
-        monkeypatch.setattr("meet.transcribe._apple_silicon", lambda: True)
-        monkeypatch.setattr("meet.transcribe._mps_available", lambda: True)
-        monkeypatch.setattr("meet.transcribe._mlx_available", lambda: False)
+        monkeypatch.setattr("millet.transcribe._apple_silicon", lambda: True)
+        monkeypatch.setattr("millet.transcribe._mps_available", lambda: True)
+        monkeypatch.setattr("millet.transcribe._mlx_available", lambda: False)
         config = TranscriptionConfig(device="cpu", torch_device="cpu")
         assert config.device == "cpu"
         assert config.torch_device == "cpu"
 
 
     def test_asr_backend_auto_uses_whisperx_without_mlx(self, monkeypatch):
-        monkeypatch.setattr("meet.transcribe._apple_silicon", lambda: True)
-        monkeypatch.setattr("meet.transcribe._mlx_available", lambda: False)
+        monkeypatch.setattr("millet.transcribe._apple_silicon", lambda: True)
+        monkeypatch.setattr("millet.transcribe._mlx_available", lambda: False)
 
         config = TranscriptionConfig(asr_backend="auto")
 
         assert config.asr_backend == "whisperx"
 
     def test_asr_backend_auto_uses_mlx_on_apple_silicon(self, monkeypatch):
-        monkeypatch.setattr("meet.transcribe._apple_silicon", lambda: True)
-        monkeypatch.setattr("meet.transcribe._mlx_available", lambda: True)
+        monkeypatch.setattr("millet.transcribe._apple_silicon", lambda: True)
+        monkeypatch.setattr("millet.transcribe._mlx_available", lambda: True)
 
         config = TranscriptionConfig(asr_backend="auto", model="large-v3-turbo")
 
@@ -631,7 +641,7 @@ class TestMlxAsrBackend:
         """The MLX VAD note must fire even when the user passes the defaults,
         since the values are still inert under MLX."""
         # Reset the module-level once-per-process flag so the note fires.
-        monkeypatch.setattr("meet.transcribe._mlx_vad_note_logged", False)
+        monkeypatch.setattr("millet.transcribe._mlx_vad_note_logged", False)
 
         class FakeMlxWhisper:
             @staticmethod
@@ -654,7 +664,7 @@ class TestMlxAsrBackend:
             vad_offset=TranscriptionConfig.vad_offset,
         )
 
-        with caplog.at_level(logging.INFO, logger="meet.transcribe"):
+        with caplog.at_level(logging.INFO, logger="millet.transcribe"):
             _transcribe_asr(np.zeros(16000, dtype=np.float32), config, "en")
 
         assert "MLX backend ignores VAD options" in caplog.text
@@ -663,7 +673,7 @@ class TestMlxAsrBackend:
         self, monkeypatch, caplog
     ):
         """Two MLX calls in the same process should produce only one VAD note."""
-        monkeypatch.setattr("meet.transcribe._mlx_vad_note_logged", False)
+        monkeypatch.setattr("millet.transcribe._mlx_vad_note_logged", False)
 
         class FakeMlxWhisper:
             @staticmethod
@@ -683,7 +693,7 @@ class TestMlxAsrBackend:
             mlx_model="test/model",
         )
 
-        with caplog.at_level(logging.INFO, logger="meet.transcribe"):
+        with caplog.at_level(logging.INFO, logger="millet.transcribe"):
             _transcribe_asr(np.zeros(16000, dtype=np.float32), config, "en")
             _transcribe_asr(np.zeros(16000, dtype=np.float32), config, "en")
 
@@ -738,7 +748,7 @@ class TestWhisperXAsrBackend:
             SimpleNamespace(load_model=fake_load_model, load_audio=fake_load_audio),
         )
         monkeypatch.setitem(sys.modules, "torch", SimpleNamespace())
-        monkeypatch.setattr("meet.transcribe._extract_mono", fake_extract_mono)
+        monkeypatch.setattr("millet.transcribe._extract_mono", fake_extract_mono)
 
         config = TranscriptionConfig(
             asr_backend="whisperx",
@@ -768,7 +778,7 @@ class TestDualChannelDispatch:
             segments=[], speakers=[], language="en",
             audio_file=str(stereo_wav), duration=5.0,
         )
-        with patch("meet.transcribe._transcribe_dual_channel", return_value=dummy) as mock_dual:
+        with patch("millet.transcribe._transcribe_dual_channel", return_value=dummy) as mock_dual:
             config = TranscriptionConfig(mixdown="dual")
             result = do_transcribe(str(stereo_wav), config)
             mock_dual.assert_called_once()
@@ -776,7 +786,7 @@ class TestDualChannelDispatch:
 
     def test_mono_mixdown_does_not_dispatch_to_dual_channel(self, stereo_wav):
         """Stereo audio with mixdown='mono' should NOT call _transcribe_dual_channel."""
-        with patch("meet.transcribe._transcribe_dual_channel") as mock_dual:
+        with patch("millet.transcribe._transcribe_dual_channel") as mock_dual:
             config = TranscriptionConfig(mixdown="mono")
             with pytest.raises(Exception):
                 do_transcribe(str(stereo_wav), config)

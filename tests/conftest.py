@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import struct
 import wave
 from pathlib import Path
 
@@ -11,7 +10,6 @@ import numpy as np
 import pytest
 
 from millet.transcribe import Segment, Speaker, Transcript
-
 
 # ─── Transcript fixture ────────────────────────────────────────────────────
 

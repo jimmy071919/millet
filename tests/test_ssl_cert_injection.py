@@ -25,7 +25,7 @@ def test_ssl_cert_file_is_set_after_import():
         [
             sys.executable,
             "-c",
-            "import meet, os, json; "
+            "import millet, os, json; "
             "print(json.dumps({"
             "'set': 'SSL_CERT_FILE' in os.environ, "
             "'path': os.environ.get('SSL_CERT_FILE', ''), "
@@ -61,7 +61,7 @@ def test_ssl_cert_file_preserves_user_override(tmp_path):
         [
             sys.executable,
             "-c",
-            "import meet, os; print(os.environ.get('SSL_CERT_FILE', ''))",
+            "import millet, os; print(os.environ.get('SSL_CERT_FILE', ''))",
         ],
         capture_output=True,
         text=True,

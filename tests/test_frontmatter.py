@@ -1,4 +1,4 @@
-"""Tests for meet.frontmatter — schema v1 build / parse / validate / render."""
+"""Tests for millet.frontmatter — schema v1 build / parse / validate / render."""
 
 from __future__ import annotations
 
@@ -20,7 +20,6 @@ from millet.frontmatter import (
     validate_frontmatter,
     write_frontmatter_sidecar,
 )
-
 
 # ─── split_body_and_data ───────────────────────────────────────────────────
 

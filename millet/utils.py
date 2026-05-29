@@ -3,11 +3,11 @@
 Re-exports all public names from `meet_record.utils`.
 """
 
-from meet_record.utils import *  # noqa: F401,F403
-from meet_record.utils import (  # noqa: F401  re-exported names
+from millet_record.utils import *  # noqa: F403
+from millet_record.utils import (  # noqa: F401  re-exported names
     fmt_elapsed,
     fmt_size,
+    fmt_srt_time,
     fmt_time,
     fmt_time_short,
-    fmt_srt_time,
 )

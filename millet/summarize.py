@@ -18,16 +18,18 @@ Configuration precedence (highest to lowest):
 
 from __future__ import annotations
 
-import os
 import json
-from dataclasses import dataclass, field
+import os
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from millet.frontmatter import FrontmatterContext
 
 import re
+
 import requests
 
 # ─── Constants ──────────────────────────────────────────────────────────────
@@ -87,7 +89,8 @@ DEFAULT_PRESET = "high-quality"
 # Backward-compatible aliases (referenced by translate command, etc.)
 DEFAULT_MODEL = DEFAULT_OLLAMA_MODEL
 
-from millet.languages import SECTION_HEADERS as _SECTION_HEADERS, LANG_NAMES as _LANGUAGE_NAMES  # noqa: E402
+from millet.languages import LANG_NAMES as _LANGUAGE_NAMES
+from millet.languages import SECTION_HEADERS as _SECTION_HEADERS
 
 # ─── Prompt loading ────────────────────────────────────────────────────────
 
@@ -417,7 +420,7 @@ class MeetingSummary:
         output_dir: str | Path,
         basename: str,
         *,
-        frontmatter_context: "FrontmatterContext | None" = None,
+        frontmatter_context: FrontmatterContext | None = None,
     ) -> Path:
         """Save the summary as a ``.summary.md`` file plus sidecars.
 
@@ -655,14 +658,14 @@ def _call_ollama_chat(
     try:
         resp = requests.post(url, json=payload, timeout=timeout)
         resp.raise_for_status()
-    except requests.Timeout:
+    except requests.Timeout as e:
         raise RuntimeError(
             f"Ollama timed out after {timeout}s. "
             f"The model '{config.model}' may be too large or slow. "
             "Try a smaller model with --summary-model."
-        )
+        ) from e
     except requests.HTTPError as e:
-        raise RuntimeError(f"Ollama API error: {e}")
+        raise RuntimeError(f"Ollama API error: {e}") from e
     elapsed = time.time() - t0
     data = resp.json()
     content = (data.get("message", {}).get("content") or "").strip()
@@ -789,7 +792,7 @@ def _summarize_openrouter(
             **extra_kwargs,
         )
     except Exception as e:
-        raise RuntimeError(f"OpenRouter API error: {e}")
+        raise RuntimeError(f"OpenRouter API error: {e}") from e
 
     elapsed = time.time() - t0
     content = (response.choices[0].message.content or "").strip()
@@ -919,7 +922,7 @@ def _summarize_tinfoil(
                 temperature=config.temperature,
             )
             break
-        except Exception as e:  # noqa: BLE001 - classify below
+        except Exception as e:
             if attempt < _TINFOIL_MAX_ATTEMPTS and _is_transient_network_error(e):
                 wait = _TINFOIL_BACKOFF_BASE ** attempt
                 import logging
@@ -936,8 +939,8 @@ def _summarize_tinfoil(
                     "Tinfoil TEE unreachable after "
                     f"{_TINFOIL_MAX_ATTEMPTS} attempts (transient network/DNS "
                     f"reaching atc.tinfoil.sh): {e}"
-                )
-            raise RuntimeError(f"Tinfoil TEE API error: {e}")
+                ) from e
+            raise RuntimeError(f"Tinfoil TEE API error: {e}") from e
 
     elapsed = time.time() - t0
     content = (response.choices[0].message.content or "").strip()
@@ -992,7 +995,7 @@ def _summarize_claudemax(
             timeout=config.timeout,
         )
     except Exception as e:
-        raise RuntimeError(f"Claude Max API Proxy error: {e}")
+        raise RuntimeError(f"Claude Max API Proxy error: {e}") from e
 
     elapsed = time.time() - t0
     content = (response.choices[0].message.content or "").strip()
@@ -1057,7 +1060,7 @@ def _summarize_openai(
             timeout=config.timeout,
         )
     except Exception as e:
-        raise RuntimeError(f"OpenAI-compatible API error ({base_url}): {e}")
+        raise RuntimeError(f"OpenAI-compatible API error ({base_url}): {e}") from e
 
     elapsed = time.time() - t0
     content = (response.choices[0].message.content or "").strip()

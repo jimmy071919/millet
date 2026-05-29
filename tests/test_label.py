@@ -1,13 +1,11 @@
-"""Tests for meet.label — speaker labeling module."""
+"""Tests for millet.label — speaker labeling module."""
 
 from __future__ import annotations
 
 import json
 import wave
-from pathlib import Path
 
 import numpy as np
-import pytest
 
 from millet.label import (
     SpeakerInfo,
@@ -19,8 +17,7 @@ from millet.label import (
     get_speakers,
     relabel_transcript_in_memory,
 )
-from millet.transcribe import Segment, Speaker, Transcript
-
+from millet.transcribe import Segment, Speaker
 
 # ─── _find_session_files() ─────────────────────────────────────────────────
 

@@ -16,15 +16,14 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_JUSTIFY, TA_RIGHT
+from reportlab.lib.colors import HexColor
+from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
-from reportlab.lib.colors import HexColor
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
@@ -33,14 +32,11 @@ from reportlab.platypus import (
     PageTemplate,
     Paragraph,
     Spacer,
-    Table,
-    TableStyle,
-    KeepTogether,
 )
 
 if TYPE_CHECKING:
-    from millet.transcribe import Transcript
     from millet.summarize import MeetingSummary
+    from millet.transcribe import Transcript
 
 
 # ─── Font registration ──────────────────────────────────────────────────────
@@ -54,7 +50,8 @@ _NOTO_ARABIC_BOLD = "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Bold.ttf"
 
 _fonts_registered = False
 
-from millet.languages import RTL_LANGUAGES as _RTL_LANGUAGES, PDF_SECTIONS as _PDF_SECTIONS  # noqa: E402
+from millet.languages import PDF_SECTIONS as _PDF_SECTIONS
+from millet.languages import RTL_LANGUAGES as _RTL_LANGUAGES
 
 
 def _register_fonts():
@@ -273,7 +270,7 @@ def _build_styles(language: str = "en"):
 
 # ─── Helpers ────────────────────────────────────────────────────────────────
 
-from millet.utils import fmt_time_short as _fmt_time  # noqa: E402
+from millet.utils import fmt_time_short as _fmt_time
 
 
 def _fmt_duration(seconds: float) -> str:
@@ -312,7 +309,7 @@ def _extract_date_from_filename(audio_file: str) -> str | None:
     return None
 
 
-def _group_speaker_turns(transcript: "Transcript") -> list[dict]:
+def _group_speaker_turns(transcript: Transcript) -> list[dict]:
     """Group consecutive segments from the same speaker into turns.
 
     Returns a list of dicts:
@@ -520,9 +517,9 @@ class _PDFDocTemplate(BaseDocTemplate):
 # ─── Public API ─────────────────────────────────────────────────────────────
 
 def generate_pdf(
-    transcript: "Transcript",
+    transcript: Transcript,
     output_path: str | Path,
-    summary: "MeetingSummary | None" = None,
+    summary: MeetingSummary | None = None,
     title: str = "Meeting Transcript",
     language: str = "en",
     confidential: bool = False,

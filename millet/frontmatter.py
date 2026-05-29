@@ -226,7 +226,7 @@ def _iso_duration(seconds: float | None) -> str | None:
     """
     if seconds is None or seconds <= 0:
         return None
-    total = int(round(seconds))
+    total = round(seconds)
     h, rem = divmod(total, 3600)
     m, s = divmod(rem, 60)
     parts = []

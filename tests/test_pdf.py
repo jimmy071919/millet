@@ -1,10 +1,6 @@
-"""Tests for meet.pdf — PDF generation helpers."""
+"""Tests for millet.pdf — PDF generation helpers."""
 
 from __future__ import annotations
-
-from pathlib import Path
-
-import pytest
 
 from millet.pdf import (
     _escape_xml,
@@ -15,7 +11,6 @@ from millet.pdf import (
     generate_pdf,
 )
 from millet.transcribe import Segment, Speaker, Transcript
-
 
 # ─── _is_rtl() ─────────────────────────────────────────────────────────────
 

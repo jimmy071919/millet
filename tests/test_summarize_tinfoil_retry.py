@@ -19,7 +19,6 @@ import pytest
 import millet.summarize as sm
 from millet.summarize import SummaryConfig, _is_transient_network_error
 
-
 # ── classifier ──────────────────────────────────────────────────────────────
 
 

@@ -417,9 +417,7 @@ def enroll_session(
     Returns:
         Dict mapping speaker name to True (enrolled) or False (failed).
     """
-    from meet.label import _find_session_files, _load_transcript
-    from meet.audio import read_stereo_channels
-    from meet.transcribe import Segment
+    from millet.label import _find_session_files, _load_transcript
 
     def _log(msg: str) -> None:
         if progress_callback:
