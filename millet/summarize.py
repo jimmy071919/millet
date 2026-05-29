@@ -812,6 +812,69 @@ def _summarize_openrouter(
 
 # ─── Tinfoil TEE backend ──────────────────────────────────────────────────
 
+# Number of attempts + base backoff for the Tinfoil path.  The SDK does
+# a network fetch at client construction (GET https://atc.tinfoil.sh/routers)
+# AND for the inference call; on hosts with flaky DNS a single transient
+# lookup failure used to hard-fail the whole summarization.  Retry both.
+_TINFOIL_MAX_ATTEMPTS = 3
+_TINFOIL_BACKOFF_BASE = 2.0  # seconds: ~2s, 4s, 8s
+
+
+def _is_transient_network_error(exc: BaseException) -> bool:
+    """True if ``exc`` looks like a transient connectivity/DNS blip worth
+    retrying (as opposed to a genuine auth/model/config error that won't
+    improve on retry).
+
+    The Tinfoil SDK surfaces a DNS failure during router discovery as
+    ``ValueError("Failed to fetch router addresses: <urlopen error ...>")``;
+    other backends raise socket/urllib/httpx connection errors.
+    """
+    import socket
+    import urllib.error
+
+    transient_types: tuple[type[BaseException], ...] = (
+        socket.gaierror,
+        socket.timeout,
+        ConnectionError,
+        TimeoutError,
+        urllib.error.URLError,
+    )
+    try:
+        import httpx
+        transient_types += (
+            httpx.ConnectError,
+            httpx.ConnectTimeout,
+            httpx.ReadTimeout,
+            httpx.WriteTimeout,
+            httpx.RemoteProtocolError,
+        )
+    except Exception:
+        pass
+
+    if isinstance(exc, transient_types):
+        return True
+    # Walk the cause/context chain (the SDK wraps URLError in ValueError).
+    seen = set()
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        if isinstance(cur, transient_types):
+            return True
+        cur = cur.__cause__ or cur.__context__
+    # Last resort: match the SDK's router-discovery message + common DNS text.
+    msg = str(exc).lower()
+    markers = (
+        "failed to fetch router addresses",
+        "name or service not known",
+        "temporary failure in name resolution",
+        "no address associated with hostname",
+        "connection reset",
+        "connection refused",
+        "timed out",
+    )
+    return any(m in msg for m in markers)
+
+
 def _summarize_tinfoil(
     system_prompt: str,
     user_prompt: str,
@@ -821,6 +884,11 @@ def _summarize_tinfoil(
 
     Prompts are encrypted into the secure enclave and processed inside
     NVIDIA H100 Confidential Computing.  The provider cannot see the data.
+
+    Resilience (v0.9.2): both the client construction (which fetches the
+    enclave router list over the network) and the completion call are
+    retried on transient connectivity/DNS errors with exponential
+    backoff.  Genuine auth/model errors fail fast (no retry).
     """
     import time
 
@@ -834,21 +902,42 @@ def _summarize_tinfoil(
 
     from tinfoil import TinfoilAI
 
-    client = TinfoilAI(api_key=api_key)
-
     t0 = time.time()
+    response = None
 
-    try:
-        response = client.chat.completions.create(
-            model=config.model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=config.temperature,
-        )
-    except Exception as e:
-        raise RuntimeError(f"Tinfoil TEE API error: {e}")
+    for attempt in range(1, _TINFOIL_MAX_ATTEMPTS + 1):
+        try:
+            # Client init does a network fetch (router discovery) — keep it
+            # inside the retry so a DNS blip here doesn't hard-fail.
+            client = TinfoilAI(api_key=api_key)
+            response = client.chat.completions.create(
+                model=config.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=config.temperature,
+            )
+            break
+        except Exception as e:  # noqa: BLE001 - classify below
+            if attempt < _TINFOIL_MAX_ATTEMPTS and _is_transient_network_error(e):
+                wait = _TINFOIL_BACKOFF_BASE ** attempt
+                import logging
+                logging.getLogger("millet.summarize").warning(
+                    "Tinfoil attempt %d/%d hit a transient network/DNS error; "
+                    "retrying in %.0fs: %s",
+                    attempt, _TINFOIL_MAX_ATTEMPTS, wait, e,
+                )
+                time.sleep(wait)
+                continue
+            # Either out of attempts, or a non-transient (auth/model) error.
+            if _is_transient_network_error(e):
+                raise RuntimeError(
+                    "Tinfoil TEE unreachable after "
+                    f"{_TINFOIL_MAX_ATTEMPTS} attempts (transient network/DNS "
+                    f"reaching atc.tinfoil.sh): {e}"
+                )
+            raise RuntimeError(f"Tinfoil TEE API error: {e}")
 
     elapsed = time.time() - t0
     content = (response.choices[0].message.content or "").strip()

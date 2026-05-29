@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.9.2 — resilient Tinfoil (confidential) summarization
+
+The `confidential` summary preset (Tinfoil TEE backend) could hard-fail
+on a single transient DNS/network blip: the Tinfoil SDK does a network
+fetch at client construction (router discovery,
+`GET https://atc.tinfoil.sh/routers`) and the client init was outside
+the retry path, so one flaky lookup aborted the whole summarization.
+
+### Fixed
+
+* **`_summarize_tinfoil` now retries transient network/DNS errors** with
+  exponential backoff (3 attempts, ~2s/4s/8s).  Both the client
+  construction (router discovery) and the completion call are inside the
+  retry.  Genuine auth/model errors still fail fast (no retry), and a
+  persistent outage surfaces a clear "Tinfoil TEE unreachable after N
+  attempts" message naming the likely cause.
+* New `_is_transient_network_error()` classifier walks the exception
+  cause chain (the SDK wraps `URLError` in `ValueError("Failed to fetch
+  router addresses…")`) and matches common DNS/connection failure text.
+
 ## v0.9.1 — team-aware paths (`--team`) + millet env-var aliases
 
 Adds an optional team dimension so a scribe recording for multiple
