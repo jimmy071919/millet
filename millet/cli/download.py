@@ -20,11 +20,32 @@ def download(languages, download_all):
     Examples:
         meet download de tr fa    # download German, Turkish, Farsi
         meet download --all       # download all supported models
+        meet download parakeet    # download the Parakeet ASR model (English)
     """
     from millet.transcribe import (
         download_alignment_model,
         get_supported_alignment_languages,
     )
+
+    # Special-case the Parakeet ASR model.  It is not a language alignment
+    # model, but `millet download parakeet` is the natural place users look
+    # for it (mirrors `meet download <lang>`).
+    if "parakeet" in languages:
+        from millet.parakeet import download_parakeet, ensure_parakeet_cached
+
+        if ensure_parakeet_cached():
+            click.echo("  Parakeet model: already cached, skipping.")
+        else:
+            try:
+                download_parakeet(
+                    progress_callback=lambda msg: click.echo(f"  {msg}")
+                )
+            except Exception as exc:
+                click.echo(f"  Error downloading Parakeet model: {exc}", err=True)
+                raise SystemExit(1) from None
+        languages = tuple(lang for lang in languages if lang != "parakeet")
+        if not languages and not download_all:
+            return
 
     info = get_supported_alignment_languages()
 

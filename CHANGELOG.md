@@ -1,5 +1,49 @@
 # Changelog
 
+## v0.11.0 — Parakeet ASR backend (opt-in, English, ONNX)
+
+Adds a third ASR backend alongside `whisperx` and `mlx`: **NVIDIA Parakeet
+TDT** via [onnx-asr](https://github.com/istupakov/onnx-asr) (ONNX Runtime,
+pure-Python — no extra torch/transformers).  Opt-in only; `auto` selection is
+unchanged.  Intended for benchmarking against the WhisperX default on English
+meetings before any default change.
+
+### Added
+
+* **`--asr-backend parakeet`** (`millet transcribe`).  Uses the English
+  `nemo-parakeet-tdt-0.6b-v2` model by default; override with
+  `--parakeet-model`.  Long audio is automatically chunked through onnx-asr's
+  Silero VAD adapter (Parakeet's per-utterance limit is ~20-30 s), with
+  global timestamps stitched back.  Emits the same WhisperX-shaped result
+  dict the other backends produce, so alignment / diarization / dual-channel
+  labeling downstream are unchanged.
+* **Alignment toggle for Parakeet** — `--parakeet-keep-alignment`:
+  * default (config "B"): trust Parakeet's native VAD-segment timestamps
+    (skips WhisperX wav2vec2 alignment; faster).
+  * with the flag (config "C"): run WhisperX alignment on top of Parakeet
+    text for word-level timestamps.
+  This exists so the ASR benchmark can measure B vs C and pick a default.
+* **`millet download parakeet`** — explicit, lazy fetch of the Parakeet +
+  Silero VAD ONNX weights into the HF cache (mirrors `millet download <lang>`
+  for alignment models).  Never auto-downloads inside `transcribe`.
+* **`millet-pipeline[parakeet]` optional extra** — pulls `onnx-asr[hub]`
+  (numpy + onnxruntime + huggingface-hub only).  For CUDA, install
+  `onnxruntime-gpu` on the GPU host.
+* **`scripts/bench_asr.py`** — benchmark harness comparing configs A
+  (whisperx) / B (parakeet native ts) / C (parakeet + alignment): reports
+  RTFx, wall time, segment/speaker counts, and dumps transcripts for
+  side-by-side human comparison.  WER-vs-stored-transcripts is intentionally
+  not computed (those are themselves Whisper output).
+* `millet/parakeet.py` module + `tests/test_parakeet.py` (12 tests: contract
+  shape, config B/C wiring, backend validation, dispatch, availability guard).
+
+### Notes
+
+* `auto` deliberately never selects Parakeet; it remains opt-in pending
+  benchmark data (English-only, separate timestamp behavior).
+* Parakeet v2 is English-only; multilingual v3 (`nemo-parakeet-tdt-0.6b-v3`)
+  is reachable via `--parakeet-model` but is not the benchmark target.
+
 ## v0.10.0 — tech-debt sweep: import-bug fix, CI, ruff, cli.py split
 
 Code-health release.  No user-facing behavior change; minor bump because

@@ -40,15 +40,31 @@ from ._helpers import (
 )
 @click.option(
     "--asr-backend",
-    type=click.Choice(["auto", "whisperx", "mlx"]),
+    type=click.Choice(["auto", "whisperx", "mlx", "parakeet"]),
     default="auto",
-    help="ASR backend: auto, whisperx, or mlx (default: auto)",
+    help="ASR backend: auto, whisperx, mlx, or parakeet (default: auto). "
+    "parakeet = NVIDIA Parakeet via onnx-asr (English; needs "
+    "'millet download parakeet').",
 )
 @click.option(
     "--mlx-model",
     type=str,
     default=None,
     help="MLX Whisper model path/repo (default: alias mapped from --model)",
+)
+@click.option(
+    "--parakeet-model",
+    type=str,
+    default=None,
+    help="Parakeet onnx-asr model name (default: nemo-parakeet-tdt-0.6b-v2, English)",
+)
+@click.option(
+    "--parakeet-keep-alignment",
+    is_flag=True,
+    default=False,
+    help="With --asr-backend parakeet, run WhisperX word-level alignment on "
+    "top of Parakeet (config 'C') instead of trusting Parakeet's native "
+    "timestamps (config 'B', the default).",
 )
 @click.option(
     "--compute-type",
@@ -143,6 +159,8 @@ def transcribe(
     torch_device,
     asr_backend,
     mlx_model,
+    parakeet_model,
+    parakeet_keep_alignment,
     compute_type,
     batch_size,
     language,
@@ -190,6 +208,8 @@ def transcribe(
         torch_device=torch_device,
         asr_backend=asr_backend,
         mlx_model=mlx_model,
+        parakeet_model=parakeet_model,
+        parakeet_skip_alignment=not parakeet_keep_alignment,
         compute_type=compute_type,
         batch_size=batch_size,
         language=language,
@@ -213,6 +233,10 @@ def transcribe(
     click.echo(f"Transcribing: {audio_path}")
     if config.asr_backend == "mlx":
         click.echo(f"  ASR:      mlx ({config.mlx_model})")
+    elif config.asr_backend == "parakeet":
+        _pk_model = config.parakeet_model or "nemo-parakeet-tdt-0.6b-v2"
+        _align = "keep-alignment" if not config.skip_alignment else "native-timestamps"
+        click.echo(f"  ASR:      parakeet ({_pk_model}, {_align})")
     else:
         click.echo(f"  ASR:      whisperx ({config.model}, {config.compute_type})")
     click.echo(f"  Device:   {config.device}")

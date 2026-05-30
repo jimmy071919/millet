@@ -146,6 +146,10 @@ def _mlx_available() -> bool:
     return importlib.util.find_spec("mlx_whisper") is not None
 
 
+def _parakeet_available() -> bool:
+    return importlib.util.find_spec("onnx_asr") is not None
+
+
 def _apple_silicon() -> bool:
     try:
         import platform
@@ -438,6 +442,15 @@ class TranscriptionConfig:
     torch_device: str | None = None
     asr_backend: str = "auto"
     mlx_model: str | None = None
+    # Parakeet (onnx-asr) model name; None -> module default (English v2).
+    parakeet_model: str | None = None
+    # When using the parakeet backend, whether to skip WhisperX word-level
+    # alignment and trust Parakeet's native (VAD-segment) timestamps.
+    #   True  = config "B" (fast; native timestamps)
+    #   False = config "C" (Parakeet text + wav2vec2-refined timestamps)
+    # This flag exists so the ASR benchmark can measure B vs C and pick the
+    # right default; it has no effect on whisperx/mlx backends.
+    parakeet_skip_alignment: bool = True
     compute_type: str = "float16"
     batch_size: int = 16
     language: str = "auto"
@@ -476,15 +489,28 @@ class TranscriptionConfig:
             raise ValueError(
                 f"Invalid mixdown mode '{self.mixdown}': must be 'mono' or 'dual'"
             )
-        if self.asr_backend not in ("auto", "whisperx", "mlx"):
+        if self.asr_backend not in ("auto", "whisperx", "mlx", "parakeet"):
             raise ValueError(
-                f"Invalid ASR backend '{self.asr_backend}': must be 'auto', 'whisperx', or 'mlx'"
+                f"Invalid ASR backend '{self.asr_backend}': must be 'auto', "
+                f"'whisperx', 'mlx', or 'parakeet'"
             )
         if self.asr_backend == "auto":
+            # Parakeet is intentionally NOT an auto candidate yet — it is
+            # opt-in via --asr-backend parakeet until benchmark data justifies
+            # promoting it (English-only, ONNX, separate timestamp behavior).
             self.asr_backend = "mlx" if _apple_silicon() and _mlx_available() else "whisperx"
         # Resolve model aliases for the selected backend.
         if self.asr_backend == "mlx":
             self.mlx_model = resolve_mlx_model(self.mlx_model or self.model)
+        elif self.asr_backend == "parakeet":
+            # Parakeet model names are onnx-asr identifiers, not whisper
+            # aliases; leave self.model untouched and let the parakeet module
+            # resolve its own default when parakeet_model is None.
+            # Config "B": trust Parakeet's native VAD-segment timestamps and
+            # skip the WhisperX wav2vec2 alignment pass.  Config "C" leaves
+            # skip_alignment as the user set it so alignment still runs.
+            if self.parakeet_skip_alignment:
+                self.skip_alignment = True
         else:
             self.model = resolve_model(self.model)
         # Resolve device defaults.  CUDA is unavailable on macOS, so on Apple
@@ -919,6 +945,17 @@ def _transcribe_asr(
             "language": result.get("language") or language or "en",
             "text": result.get("text", ""),
         }
+
+    if config.asr_backend == "parakeet":
+        from millet.parakeet import transcribe_parakeet
+
+        print(f"  Loading Parakeet model: {config.parakeet_model or 'parakeet-tdt-0.6b-v2 (en)'}")
+        return transcribe_parakeet(
+            audio,
+            model=config.parakeet_model,
+            device=config.device,
+            language=language,
+        )
 
     if whisperx_model is not None:
         return _run_whisperx_asr(whisperx_model, audio, config)
