@@ -474,9 +474,28 @@ class TranscriptionConfig:
     # chose not to download it.
     skip_alignment: bool = False
     # Mixdown mode for stereo recordings:
-    #   "mono" = mix both channels to mono (default, uses diarization)
-    #   "dual" = transcribe each channel separately, label as YOU/REMOTE
-    mixdown: str = "mono"
+    #   "dual-diarize" = transcribe channels separately + diarize system
+    #                     channel (default; best accuracy for multi-speaker
+    #                     stereo — preserves named remotes, no overlap leak)
+    #   "mono"         = mix to mono + diarize (legacy; faster, but suffers
+    #                     overlap-fragmentation at turn boundaries)
+    #   "dual"         = transcribe channels separately, all remotes = REMOTE
+    mixdown: str = "dual-diarize"
+    # Hybrid channel-energy correction (mono path only): after diarization +
+    # YOU/REMOTE labeling, reassign individual segments/words whose audio is
+    # *strongly* dominated by the opposite channel from their label.  Fixes
+    # turn-boundary leaks (e.g. a remote interjection glued onto the local
+    # speaker) without the 2x cost of full dual transcription, and keeps
+    # multi-speaker diarization/voiceprint naming intact.  On by default for
+    # stereo; disable via --no-channel-correct.
+    channel_correct: bool = True
+    # Minimum margin by which the opposite channel must dominate a segment's
+    # energy ratio before we override its diarized YOU/REMOTE side.  Higher =
+    # more conservative (resists mic bleed from open speakers).  The ratio is
+    # mic/(mic+sys) in [0,1]; a YOU segment is flipped to REMOTE only when its
+    # ratio < (0.5 - margin), and a REMOTE segment to YOU only when its ratio
+    # > (0.5 + margin).
+    channel_correct_margin: float = 0.30
 
     # Internal: set to True by __post_init__ when `device` was auto-flipped
     # to 'cpu' because the requested accelerator was unavailable.  Used to
@@ -485,9 +504,10 @@ class TranscriptionConfig:
     _device_auto_fallback: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self):
-        if self.mixdown not in ("mono", "dual"):
+        if self.mixdown not in ("mono", "dual", "dual-diarize"):
             raise ValueError(
-                f"Invalid mixdown mode '{self.mixdown}': must be 'mono' or 'dual'"
+                f"Invalid mixdown mode '{self.mixdown}': must be "
+                f"'mono', 'dual', or 'dual-diarize'"
             )
         if self.asr_backend not in ("auto", "whisperx", "mlx", "parakeet"):
             raise ValueError(
@@ -1136,6 +1156,216 @@ def _transcribe_dual_channel(
                     pass
 
 
+def _transcribe_dual_diarize(
+    audio_file: Path, config: TranscriptionConfig, duration: float
+) -> Transcript:
+    """Dual-channel transcribe + system-channel diarization.
+
+    Best-of-both-worlds approach:
+
+    * **Mic channel** → transcribed independently → all segments labeled YOU.
+      Kemal's speech is captured continuously from his mic, immune to overlap
+      with remote speakers.  No diarization needed (single local speaker).
+
+    * **System channel** → transcribed independently → **pyannote diarization**
+      splits the remote stream into distinct speakers (SPEAKER_00, _01, …)
+      which downstream voiceprint matching names (Openoms, Jonas, etc.).
+
+    * Both channels are **merged by timestamp** with overlaps preserved —
+      when Kemal and a remote speak simultaneously, both segments exist at
+      that time, each from its own channel.
+
+    This eliminates the overlap-fragmentation problem of mono+channel-correct
+    (per-word channel sampling during overlap) while preserving multi-remote
+    speaker naming that pure ``mixdown="dual"`` loses.
+    """
+    import numpy as np
+    import torch
+    import whisperx
+    from whisperx.diarize import DiarizationPipeline
+
+    mic_path = None
+    sys_path = None
+    asr_model = None
+
+    try:
+        mic_path = _extract_mono(audio_file, channel=0)
+        sys_path = _extract_mono(audio_file, channel=1)
+
+        whisper_lang = None if config.language == "auto" else config.language
+
+        pad_samples = (
+            int(config.audio_pad_seconds * 16000) if config.audio_pad_seconds > 0 else 0
+        )
+
+        # ── Transcribe mic channel (YOU) ──
+        print("  Transcribing mic channel (left / YOU)...")
+        mic_audio = whisperx.load_audio(str(mic_path))
+        if pad_samples > 0:
+            mic_audio = np.concatenate(
+                [mic_audio, np.zeros(pad_samples, dtype=mic_audio.dtype)]
+            )
+        if config.asr_backend == "whisperx":
+            asr_model = _load_whisperx_asr_model(config, whisper_lang)
+        mic_result = _transcribe_asr(
+            mic_audio, config, whisper_lang, whisperx_model=asr_model
+        )
+
+        detected_language = mic_result.get("language", whisper_lang or "en")
+        if config.language == "auto":
+            print(f"  Detected language: {detected_language}")
+
+        # ── Transcribe system channel (remotes) ──
+        print("  Transcribing system channel (right / remotes)...")
+        sys_audio = whisperx.load_audio(str(sys_path))
+        if pad_samples > 0:
+            sys_audio = np.concatenate(
+                [sys_audio, np.zeros(pad_samples, dtype=sys_audio.dtype)]
+            )
+        sys_result = _transcribe_asr(
+            sys_audio, config, whisper_lang, whisperx_model=asr_model
+        )
+
+        if asr_model is not None:
+            del asr_model
+            asr_model = None
+
+        gc.collect()
+        _empty_torch_caches(torch, config)
+
+        # ── Align both channels ──
+        if config.skip_alignment:
+            print("  Skipping alignment (--skip-alignment)")
+        elif detected_language in ALIGNMENT_MODELS and not check_alignment_model_cached(
+            detected_language
+        ):
+            gc.collect()
+            _empty_torch_cache(torch, config.torch_device)
+            raise AlignmentModelMissing(detected_language)
+        else:
+            print(f"  Aligning word timestamps ({detected_language})...")
+            try:
+                model_a, metadata = whisperx.load_align_model(
+                    language_code=detected_language,
+                    device=config.torch_device,
+                )
+                mic_result = whisperx.align(
+                    mic_result["segments"],
+                    model_a,
+                    metadata,
+                    mic_audio,
+                    config.torch_device,
+                    return_char_alignments=False,
+                )
+                sys_result = whisperx.align(
+                    sys_result["segments"],
+                    model_a,
+                    metadata,
+                    sys_audio,
+                    config.torch_device,
+                    return_char_alignments=False,
+                )
+                del model_a
+                gc.collect()
+                _empty_torch_cache(torch, config.torch_device)
+            except Exception as align_exc:
+                if detected_language in ALIGNMENT_MODELS:
+                    raise AlignmentModelMissing(detected_language) from align_exc
+                print(
+                    f"  Warning: alignment failed ({align_exc}), "
+                    "continuing without word-level timestamps"
+                )
+
+        # ── Diarize system channel (split remotes) ──
+        if config.hf_token:
+            print("  Running speaker diarization on system channel...")
+            diarize_model = DiarizationPipeline(
+                token=config.hf_token,
+                device=config.torch_device,
+            )
+
+            diarize_kwargs: dict[str, Any] = {}
+            if config.min_speakers is not None:
+                # The local speaker is on mic, not in sys_audio; remote
+                # speaker count = total speakers - 1 (YOU).
+                diarize_kwargs["min_speakers"] = max(1, config.min_speakers - 1)
+            if config.max_speakers is not None:
+                diarize_kwargs["max_speakers"] = max(1, config.max_speakers - 1)
+
+            diarize_segments = diarize_model(sys_audio, **diarize_kwargs)
+            sys_result = whisperx.assign_word_speakers(diarize_segments, sys_result)
+
+            del diarize_model
+            gc.collect()
+            _empty_torch_cache(torch, config.torch_device)
+        else:
+            print("  Skipping remote diarization (no HF_TOKEN provided)")
+            # Without diarization, all system segments become generic REMOTE.
+
+        # ── Build segments ──
+        max_t = duration if duration and duration > 0 else float("inf")
+        segments: list[Segment] = []
+        remote_speaker_ids: set[str] = set()
+
+        # Mic → all YOU
+        for seg in mic_result["segments"]:
+            seg_start = min(seg["start"], max_t)
+            seg_end = min(seg["end"], max_t)
+            if seg_end <= seg_start:
+                continue
+            segments.append(
+                Segment(
+                    start=seg_start,
+                    end=seg_end,
+                    text=seg["text"],
+                    speaker="YOU",
+                    words=seg.get("words"),
+                )
+            )
+
+        # System → diarized SPEAKER_XX (or REMOTE if no diarization)
+        for seg in sys_result["segments"]:
+            seg_start = min(seg["start"], max_t)
+            seg_end = min(seg["end"], max_t)
+            if seg_end <= seg_start:
+                continue
+            speaker = seg.get("speaker") or "REMOTE"
+            remote_speaker_ids.add(speaker)
+            segments.append(
+                Segment(
+                    start=seg_start,
+                    end=seg_end,
+                    text=seg["text"],
+                    speaker=speaker,
+                    words=seg.get("words"),
+                )
+            )
+
+        segments.sort(key=lambda s: s.start)
+
+        speakers = [Speaker(id="YOU", label="YOU")]
+        for sid in sorted(remote_speaker_ids):
+            speakers.append(Speaker(id=sid))
+
+        return Transcript(
+            segments=segments,
+            speakers=speakers,
+            language=detected_language,
+            audio_file=str(audio_file),
+            duration=duration,
+        )
+
+    finally:
+        if asr_model is not None:
+            del asr_model
+        for p in (mic_path, sys_path):
+            if p is not None:
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
+
+
 def transcribe(
     audio_file: str | Path, config: TranscriptionConfig | None = None
 ) -> Transcript:
@@ -1165,10 +1395,15 @@ def transcribe(
     # but keep the stereo file for channel-aware diarization hints
     is_stereo = _is_stereo(audio_path)
 
-    if not is_stereo and config.mixdown == "dual":
+    if not is_stereo and config.mixdown in ("dual", "dual-diarize"):
         print(
-            "  Warning: --mixdown dual requires stereo audio, using standard mono pipeline"
+            f"  Warning: --mixdown {config.mixdown} requires stereo audio, "
+            "using standard mono pipeline"
         )
+
+    if is_stereo and config.use_dual_channel and config.mixdown == "dual-diarize":
+        print("  Dual-channel detected: transcribing channels separately + diarizing remotes")
+        return _transcribe_dual_diarize(audio_path, config, duration)
 
     if is_stereo and config.use_dual_channel and config.mixdown == "dual":
         print("  Dual-channel detected: transcribing channels separately")
@@ -1319,6 +1554,20 @@ def transcribe(
                 )
                 segments, speakers = _split_by_channel(audio_path, segments)
 
+            # ── Step 5b: Hybrid channel-energy correction ──
+            # Diarization can mis-assign a segment whose audio clearly lives on
+            # the *other* channel than its labeled speaker — most visibly when a
+            # remote interjection ("thanks for that update") at a turn boundary
+            # gets glued onto the local speaker's segment.  Correct such
+            # segments (and words) by reassigning the YOU<->REMOTE channel side
+            # when one channel *strongly* dominates, while leaving ambiguous /
+            # mic-bleed segments on their diarized label.
+            if config.channel_correct:
+                segments, speakers = _channel_correct_segments(
+                    audio_path, segments, speakers,
+                    margin=config.channel_correct_margin,
+                )
+
         return Transcript(
             segments=segments,
             speakers=speakers,
@@ -1448,6 +1697,234 @@ def _label_speakers_from_channels(
         new_speakers.append(Speaker(id=new_label, label=new_label))
 
     return new_segments, new_speakers
+
+
+def _seg_channel_ratio(mic, sys_, start_t, end_t, sr, n):
+    """Return mic/(mic+sys) RMS ratio for a [start_t, end_t] window, or None.
+
+    None means the window is empty or near-silent (no usable signal).
+    """
+    import numpy as np
+
+    start = max(0, min(int(start_t * sr), n))
+    end = max(0, min(int((end_t if end_t is not None else start_t) * sr), n))
+    if end <= start:
+        return None
+    mic_rms = float(np.sqrt(np.mean(mic[start:end] ** 2)))
+    sys_rms = float(np.sqrt(np.mean(sys_[start:end] ** 2)))
+    denom = mic_rms + sys_rms
+    if denom < 1e-8:
+        return None
+    return mic_rms / denom
+
+
+def _channel_correct_segments(
+    stereo_file: Path,
+    segments: list[Segment],
+    speakers: list[Speaker],
+    margin: float = 0.30,
+) -> tuple[list[Segment], list[Speaker]]:
+    """Reassign segments/words whose audio strongly contradicts their channel.
+
+    Runs after diarization + YOU/REMOTE labeling on the mono path.  For each
+    segment we compare its per-segment mic/(mic+sys) energy ratio against the
+    channel *side* implied by its current label:
+
+      * a YOU-side segment is flipped to REMOTE only when it is strongly
+        system-dominant   (ratio < 0.5 - margin)
+      * a REMOTE-side segment is flipped to YOU only when it is strongly
+        mic-dominant       (ratio > 0.5 + margin)
+
+    Ambiguous / near-balanced segments (the mic-bleed danger zone) are left
+    untouched, so we don't *introduce* errors.  We only ever flip between the
+    YOU side and the REMOTE side — we never invent or merge named remote
+    speakers, so multi-remote diarization (Max vs Patrick vs Andrej) and the
+    downstream voiceprint naming are preserved.  Words inside a flipped or
+    mixed segment are corrected individually, which splits a turn-boundary
+    segment that contains both a local utterance and a remote interjection.
+
+    Cost: one ffmpeg stereo decode (shared with the labeling step's reads) plus
+    numpy RMS over in-memory slices — well under ~2s for a 1-hour meeting.
+    """
+    from millet.audio import read_stereo_channels
+
+    if not segments:
+        return segments, speakers
+
+    # Determine the canonical mic-side ("YOU") and system-side labels present
+    # after Step 5.  YOU is always the local mic speaker; any label starting
+    # with REMOTE is system-side.  Correction only makes sense when there is a
+    # YOU side to move leaks off of (or onto): a fully-remote recording has no
+    # local channel to disambiguate against.
+    labels = {s.speaker for s in segments if s.speaker}
+    you_label = "YOU" if "YOU" in labels else None
+    remote_labels = sorted(lbl for lbl in labels if lbl and lbl.startswith("REMOTE"))
+    if you_label is None:
+        # No local speaker to correct toward/away from.
+        return segments, speakers
+    # When a YOU-side segment is found to be system-dominant (a remote leak),
+    # we move it to the generic "REMOTE" bucket — we cannot know *which*
+    # specific remote it was, and inventing one would be wrong.  Prefer an
+    # existing generic "REMOTE" label; else the first REMOTE_N; else "REMOTE".
+    if "REMOTE" in remote_labels:
+        remote_target = "REMOTE"
+    elif remote_labels:
+        remote_target = remote_labels[0]
+    else:
+        remote_target = "REMOTE"
+
+    stereo = read_stereo_channels(stereo_file)
+    if stereo is None:
+        return segments, speakers
+
+    import numpy as np
+
+    mic = stereo.mic
+    sys_ = stereo.system
+    sr = stereo.sample_rate
+    n = len(mic)
+    lo = 0.5 - margin
+    hi = 0.5 + margin
+
+    flips = 0
+    splits = 0
+    out_segments: list[Segment] = []
+    for seg in segments:
+        if not seg.speaker:
+            out_segments.append(seg)
+            continue
+        is_you = seg.speaker == you_label
+        is_remote = seg.speaker.startswith("REMOTE")
+        if not (is_you or is_remote):
+            out_segments.append(seg)  # leave named-but-unlabeled speakers alone
+            continue
+
+        # ── Whole-segment flip when the segment (sans word detail) is strongly
+        #    dominated by the opposite channel. ──
+        # Only cross-side flips: YOU->remote (use generic bucket) or
+        # remote->YOU.  A remote segment that stays system-dominant keeps its
+        # specific REMOTE_N label (never collapsed).  We rely on the word-level
+        # pass below to split mixed segments; the whole-segment flip handles the
+        # case where a segment has no usable word timestamps.
+        ratio = _seg_channel_ratio(mic, sys_, seg.start, seg.end, sr, n)
+        if ratio is not None and not seg.words:
+            if is_you and ratio < lo:
+                seg.speaker = remote_target
+                flips += 1
+            elif is_remote and ratio > hi:
+                seg.speaker = you_label
+                flips += 1
+
+        # ── Word-level correction + segment splitting. ──
+        # When a segment's words split cleanly across the two channels (the
+        # turn-boundary leak case), emit separate sub-segments per speaker so
+        # the attribution is visible in the text/SRT output, not just the word
+        # metadata.  Words in the mic-bleed grey zone inherit the (possibly
+        # flipped) segment speaker.
+        #
+        # CRITICAL: we only override a word's speaker when its channel side
+        # CONTRADICTS the diarized side.  A word that stays on its own side
+        # keeps the diarized speaker (e.g. REMOTE_2 stays REMOTE_2) — we never
+        # force same-side words into a single bucket, so multi-remote
+        # diarization (REMOTE_1..N) and voiceprint naming are preserved.  Only
+        # cross-side leaks are reassigned, and the only safe cross-side target
+        # for a YOU->remote flip is the generic remote bucket.
+        if not seg.words:
+            out_segments.append(seg)
+            continue
+
+        seg_is_remote = seg.speaker.startswith("REMOTE")
+        per_word_speaker: list[str] = []
+        for word in seg.words:
+            wr = _seg_channel_ratio(
+                mic, sys_, word.get("start"), word.get("end"), sr, n
+            )
+            if wr is None:
+                spk = seg.speaker
+            elif wr > hi and seg_is_remote:
+                # Remote-labeled word is strongly mic-dominant -> local leak.
+                spk = you_label
+            elif wr < lo and not seg_is_remote:
+                # Local (YOU) word is strongly system-dominant -> remote leak.
+                spk = remote_target
+            else:
+                # Same side as diarized (or ambiguous): KEEP the diarized
+                # speaker, preserving the specific REMOTE_N identity.
+                spk = seg.speaker
+            word["speaker"] = spk
+            per_word_speaker.append(spk)
+
+        # Split the segment into maximal runs of identical word-speaker.
+        runs = _split_segment_by_word_speaker(seg, per_word_speaker)
+        if len(runs) > 1:
+            splits += 1
+        out_segments.extend(runs)
+
+    if flips or splits:
+        print(
+            f"  Channel correction: flipped {flips} segment(s), "
+            f"split {splits} mixed segment(s)"
+        )
+
+    # Rebuild speaker list from what's actually present now.
+    present = {s.speaker for s in out_segments if s.speaker}
+    new_speakers = [sp for sp in speakers if sp.id in present]
+    for lbl in sorted(present):
+        if lbl not in {sp.id for sp in new_speakers}:
+            new_speakers.append(Speaker(id=lbl, label=lbl))
+    _ = np  # numpy used via _seg_channel_ratio
+    return out_segments, new_speakers
+
+
+def _split_segment_by_word_speaker(
+    seg: Segment, per_word_speaker: list[str]
+) -> list[Segment]:
+    """Split *seg* into consecutive runs of identical per-word speaker.
+
+    Returns one Segment per maximal same-speaker run, preserving word lists and
+    deriving each sub-segment's start/end from its words.  If all words share a
+    speaker (or there are no usable word timestamps), returns ``[seg]`` with the
+    single speaker applied.
+    """
+    words = seg.words or []
+    if not words or len(per_word_speaker) != len(words):
+        return [seg]
+
+    # Identify contiguous runs.
+    runs: list[tuple[str, list[dict]]] = []
+    cur_spk = per_word_speaker[0]
+    cur_words: list[dict] = []
+    for w, spk in zip(words, per_word_speaker, strict=False):
+        if spk != cur_spk:
+            runs.append((cur_spk, cur_words))
+            cur_spk = spk
+            cur_words = []
+        cur_words.append(w)
+    runs.append((cur_spk, cur_words))
+
+    if len(runs) == 1:
+        seg.speaker = runs[0][0]
+        return [seg]
+
+    out: list[Segment] = []
+    for spk, rwords in runs:
+        text = " ".join((w.get("word") or "").strip() for w in rwords).strip()
+        if not text:
+            continue
+        starts = [w["start"] for w in rwords if w.get("start") is not None]
+        ends = [w["end"] for w in rwords if w.get("end") is not None]
+        s_start = min(starts) if starts else seg.start
+        s_end = max(ends) if ends else seg.end
+        out.append(
+            Segment(
+                start=s_start,
+                end=s_end,
+                text=text,
+                speaker=spk,
+                words=rwords,
+            )
+        )
+    return out or [seg]
 
 
 def _split_by_channel(

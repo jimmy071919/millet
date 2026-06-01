@@ -16,6 +16,8 @@ from millet.transcribe import (
     Speaker,
     Transcript,
     TranscriptionConfig,
+    _channel_correct_segments,
+    _split_segment_by_word_speaker,
     _transcribe_asr,
     _transcribe_dual_channel,
 )
@@ -408,9 +410,9 @@ class TestLabelSpeakersFromChannels:
 # ─── TranscriptionConfig validation ──────────────────────────────────────
 
 class TestTranscriptionConfig:
-    def test_default_mixdown_is_mono(self):
+    def test_default_mixdown_is_dual_diarize(self):
         config = TranscriptionConfig()
-        assert config.mixdown == "mono"
+        assert config.mixdown == "dual-diarize"
 
     def test_valid_mixdown_dual(self):
         config = TranscriptionConfig(mixdown="dual")
@@ -791,3 +793,171 @@ class TestDualChannelDispatch:
             with pytest.raises(Exception):
                 do_transcribe(str(stereo_wav), config)
             mock_dual.assert_not_called()
+
+
+# ─── Hybrid channel-energy correction ──────────────────────────────────────
+
+
+def _write_stereo(path, placements, sr=16000):
+    """Write a stereo WAV from (start, end, channel) placements.
+
+    channel: 'mic' -> loud left/quiet right; 'sys' -> loud right/quiet left.
+    """
+    import wave
+
+    duration = max(e for _, e, _ in placements) + 0.5
+    n = int(duration * sr)
+    mic = np.zeros(n, dtype=np.float32)
+    system = np.zeros(n, dtype=np.float32)
+    for start_t, end_t, ch in placements:
+        s = int(start_t * sr)
+        e = min(int(end_t * sr), n)
+        t = np.arange(e - s, dtype=np.float32) / sr
+        if ch == "mic":
+            mic[s:e] += 18000 * np.sin(2 * np.pi * 440 * t)
+            system[s:e] += 800 * np.sin(2 * np.pi * 880 * t)
+        else:  # sys
+            system[s:e] += 18000 * np.sin(2 * np.pi * 880 * t)
+            mic[s:e] += 800 * np.sin(2 * np.pi * 440 * t)
+    stereo = np.column_stack(
+        (
+            np.clip(mic, -32768, 32767).astype(np.int16),
+            np.clip(system, -32768, 32767).astype(np.int16),
+        )
+    ).flatten()
+    with wave.open(str(path), "wb") as wf:
+        wf.setnchannels(2)
+        wf.setsampwidth(2)
+        wf.setframerate(sr)
+        wf.writeframes(stereo.tobytes())
+    return path
+
+
+class TestChannelCorrect:
+    def test_you_segment_on_system_channel_flips_to_remote(self, tmp_path):
+        """A YOU segment whose audio is on the system channel is reassigned."""
+        wav = _write_stereo(
+            tmp_path / "m.wav",
+            [(0.0, 2.0, "mic"), (2.0, 4.0, "sys")],  # 2nd is actually remote
+        )
+        segs = [
+            Segment(0.0, 2.0, "hello", speaker="YOU"),
+            Segment(2.0, 4.0, "leaked remote", speaker="YOU"),  # mislabeled
+        ]
+        speakers = [Speaker(id="YOU"), Speaker(id="REMOTE")]
+        out, _ = _channel_correct_segments(wav, segs, speakers, margin=0.30)
+        by_text = {s.text: s.speaker for s in out}
+        assert by_text["hello"] == "YOU"
+        assert by_text["leaked remote"] == "REMOTE"
+
+    def test_multi_remote_identities_preserved(self, tmp_path):
+        """Same-side remote words keep their specific REMOTE_N label."""
+        wav = _write_stereo(
+            tmp_path / "m.wav",
+            [(0.0, 2.0, "mic"), (2.0, 4.0, "sys"), (4.0, 6.0, "sys")],
+        )
+        segs = [
+            Segment(0.0, 2.0, "you talk", speaker="YOU"),
+            Segment(2.0, 4.0, "remote one", speaker="REMOTE_1"),
+            Segment(4.0, 6.0, "remote two", speaker="REMOTE_2"),
+        ]
+        speakers = [Speaker(id="YOU"), Speaker(id="REMOTE_1"), Speaker(id="REMOTE_2")]
+        out, out_speakers = _channel_correct_segments(wav, segs, speakers, margin=0.30)
+        by_text = {s.text: s.speaker for s in out}
+        # The two distinct remotes must NOT be collapsed.
+        assert by_text["remote one"] == "REMOTE_1"
+        assert by_text["remote two"] == "REMOTE_2"
+        assert by_text["you talk"] == "YOU"
+
+    def test_word_level_split_of_mixed_segment(self, tmp_path):
+        """A segment whose words span both channels is split per speaker."""
+        wav = _write_stereo(
+            tmp_path / "m.wav",
+            [(0.0, 1.0, "mic"), (1.0, 2.0, "sys")],
+        )
+        seg = Segment(
+            0.0, 2.0, "local part remote part", speaker="YOU",
+            words=[
+                {"word": "local", "start": 0.0, "end": 0.4},
+                {"word": "part", "start": 0.4, "end": 1.0},
+                {"word": "remote", "start": 1.0, "end": 1.5},
+                {"word": "part", "start": 1.5, "end": 2.0},
+            ],
+        )
+        out, _ = _channel_correct_segments(
+            wav, [seg], [Speaker(id="YOU"), Speaker(id="REMOTE")], margin=0.30
+        )
+        # Should split into a YOU run and a REMOTE run.
+        speakers_seen = [s.speaker for s in out]
+        assert "YOU" in speakers_seen
+        assert "REMOTE" in speakers_seen
+        you_seg = next(s for s in out if s.speaker == "YOU")
+        rem_seg = next(s for s in out if s.speaker == "REMOTE")
+        assert "local" in you_seg.text
+        assert "remote" in rem_seg.text
+
+    def test_ambiguous_segment_not_flipped(self, tmp_path):
+        """A balanced (mic≈sys) segment stays on its diarized label."""
+        # Place equal energy on both channels for the segment.
+        import wave
+
+        sr = 16000
+        n = int(2.5 * sr)
+        t = np.arange(n, dtype=np.float32) / sr
+        both = (10000 * np.sin(2 * np.pi * 440 * t)).astype(np.int16)
+        stereo = np.column_stack((both, both)).flatten()
+        wav = tmp_path / "amb.wav"
+        with wave.open(str(wav), "wb") as wf:
+            wf.setnchannels(2)
+            wf.setsampwidth(2)
+            wf.setframerate(sr)
+            wf.writeframes(stereo.tobytes())
+        segs = [Segment(0.0, 2.0, "balanced", speaker="YOU")]
+        out, _ = _channel_correct_segments(
+            wav, segs, [Speaker(id="YOU"), Speaker(id="REMOTE")], margin=0.30
+        )
+        assert out[0].speaker == "YOU"  # not flipped
+
+    def test_noop_without_you_or_remote(self, tmp_path):
+        """Correction is a no-op when there is no YOU+REMOTE pair."""
+        wav = _write_stereo(tmp_path / "m.wav", [(0.0, 2.0, "mic")])
+        segs = [Segment(0.0, 2.0, "named", speaker="Kemal")]
+        out, sp = _channel_correct_segments(
+            wav, segs, [Speaker(id="Kemal")], margin=0.30
+        )
+        assert out[0].speaker == "Kemal"
+
+
+class TestSplitSegmentByWordSpeaker:
+    def test_single_speaker_returns_same_segment(self):
+        seg = Segment(0.0, 2.0, "a b", speaker="YOU",
+                      words=[{"word": "a", "start": 0.0, "end": 1.0},
+                             {"word": "b", "start": 1.0, "end": 2.0}])
+        out = _split_segment_by_word_speaker(seg, ["YOU", "YOU"])
+        assert len(out) == 1
+        assert out[0].speaker == "YOU"
+
+    def test_two_runs_split(self):
+        seg = Segment(0.0, 2.0, "a b", speaker="YOU",
+                      words=[{"word": "a", "start": 0.0, "end": 1.0},
+                             {"word": "b", "start": 1.0, "end": 2.0}])
+        out = _split_segment_by_word_speaker(seg, ["YOU", "REMOTE"])
+        assert len(out) == 2
+        assert out[0].speaker == "YOU" and out[0].text == "a"
+        assert out[1].speaker == "REMOTE" and out[1].text == "b"
+
+    def test_no_words_returns_same(self):
+        seg = Segment(0.0, 2.0, "x", speaker="YOU", words=None)
+        out = _split_segment_by_word_speaker(seg, [])
+        assert out == [seg]
+
+
+class TestChannelCorrectConfig:
+    def test_default_on(self):
+        assert TranscriptionConfig(device="cpu").channel_correct is True
+
+    def test_can_disable(self):
+        assert TranscriptionConfig(device="cpu", channel_correct=False).channel_correct is False
+
+    def test_default_margin(self):
+        assert TranscriptionConfig(device="cpu").channel_correct_margin == 0.30

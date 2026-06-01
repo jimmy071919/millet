@@ -279,6 +279,64 @@ def _run(
     return result
 
 
+def _is_dns_error(result: subprocess.CompletedProcess) -> bool:
+    """Return True if the failed command's stderr indicates a DNS resolution failure."""
+    stderr = (result.stderr or "").lower()
+    return any(
+        needle in stderr
+        for needle in ("could not resolve host", "name or service not known",
+                       "temporary failure in name resolution")
+    )
+
+
+def _run_network(
+    cmd: list[str], cwd: Path | None = None, retries: int = 5, delay: float = 4.0
+) -> subprocess.CompletedProcess:
+    """Run a git network command (clone/pull/push) with DNS-gated retries.
+
+    Retries up to *retries* times when the failure looks like a transient DNS
+    resolution error.  Raises RuntimeError on a non-DNS failure or after
+    exhausting retries.
+    """
+    import socket
+    import time
+
+    last_result: subprocess.CompletedProcess | None = None
+    for attempt in range(1, retries + 1):
+        # Gate on DNS: wait until the git host resolves before burning a try.
+        host = "github.com"  # default; could be parsed from cmd
+        for _ in range(retries):
+            try:
+                socket.getaddrinfo(host, 443)
+                break
+            except socket.gaierror:
+                log.debug("DNS for %s not resolving, waiting %.0fs", host, delay)
+                time.sleep(delay)
+        else:
+            log.warning("DNS for %s did not resolve after %d waits", host, retries)
+
+        result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+        if result.returncode == 0:
+            return result
+        last_result = result
+        if _is_dns_error(result) and attempt < retries:
+            log.warning(
+                "Transient DNS error on attempt %d/%d for %s; retrying in %.0fs",
+                attempt, retries, " ".join(cmd[:3]), delay,
+            )
+            time.sleep(delay)
+            continue
+        # Non-DNS failure or last attempt — raise immediately.
+        break
+
+    assert last_result is not None
+    raise RuntimeError(
+        f"Command failed: {' '.join(cmd)}\n"
+        f"stdout: {last_result.stdout.strip()}\n"
+        f"stderr: {last_result.stderr.strip()}"
+    )
+
+
 def _current_branch_ahead_count(repo: Path) -> int:
     """Return how many local commits the current branch is ahead of upstream."""
     result = _run(
@@ -344,7 +402,7 @@ def ensure_repo_cloned(progress_callback=None, team: str | None = None) -> Path:
     if not clone_dir.exists():
         _log(f"Cloning {repo_url}...")
         clone_dir.parent.mkdir(parents=True, exist_ok=True)
-        _run(["git", "clone", repo_url, str(clone_dir)])
+        _run_network(["git", "clone", repo_url, str(clone_dir)])
         _log("Clone complete.")
     else:
         status = _run(["git", "status", "--porcelain"], cwd=clone_dir)
@@ -355,7 +413,7 @@ def ensure_repo_cloned(progress_callback=None, team: str | None = None) -> Path:
             )
 
         # Pull latest, rebasing any previously-created local meeting commits.
-        _run(["git", "pull", "--rebase"], cwd=clone_dir)
+        _run_network(["git", "pull", "--rebase"], cwd=clone_dir)
 
     return clone_dir
 
@@ -523,7 +581,7 @@ def sync_session(
         if ahead_count:
             _log(f"  No new file changes, but {ahead_count} local commit(s) need pushing.")
             _log("  Pushing...")
-            _run(["git", "push"], cwd=repo)
+            _run_network(["git", "push"], cwd=repo)
             _log(f"  Pushed {ahead_count} existing commit(s).")
             return copied
 
@@ -537,7 +595,7 @@ def sync_session(
 
     # Push
     _log("  Pushing...")
-    _run(["git", "push"], cwd=repo)
+    _run_network(["git", "push"], cwd=repo)
     _log(f"  Pushed {len(copied)} file(s).")
 
     return copied

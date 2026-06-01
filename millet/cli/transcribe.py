@@ -148,9 +148,27 @@ from ._helpers import (
 )
 @click.option(
     "--mixdown",
-    type=click.Choice(["mono", "dual"]),
-    default="mono",
-    help="Stereo mixdown mode: mono=mic channel only, dual=transcribe both channels separately (default: mono)",
+    type=click.Choice(["mono", "dual", "dual-diarize"]),
+    default="dual-diarize",
+    help="Stereo mixdown mode: dual-diarize=transcribe channels separately "
+    "+ diarize remotes (default; best accuracy), mono=mix+diarize (legacy), "
+    "dual=transcribe channels separately (YOU/REMOTE only, no remote naming).",
+)
+@click.option(
+    "--channel-correct/--no-channel-correct",
+    default=True,
+    help="Hybrid channel-energy correction for stereo (mono mixdown): reassign "
+    "segments/words whose audio is strongly dominated by the opposite channel "
+    "from their diarized YOU/REMOTE label. Fixes turn-boundary attribution "
+    "leaks. On by default; --no-channel-correct to disable.",
+)
+@click.option(
+    "--channel-correct-margin",
+    type=float,
+    default=0.30,
+    help="Dominance margin for channel correction (default: 0.30). A segment's "
+    "mic/(mic+sys) ratio must cross 0.5±margin to override its diarized side. "
+    "Higher = more conservative (resists mic bleed from open speakers).",
 )
 def transcribe(
     audio_file,
@@ -176,6 +194,8 @@ def transcribe(
     ollama_singlepass,
     skip_alignment,
     mixdown,
+    channel_correct,
+    channel_correct_margin,
 ):
     """Transcribe a recorded audio file with speaker diarization."""
     from millet.transcribe import (
@@ -218,6 +238,8 @@ def transcribe(
         max_speakers=max_speakers,
         skip_alignment=skip_alignment,
         mixdown=mixdown,
+        channel_correct=channel_correct,
+        channel_correct_margin=channel_correct_margin,
     )
 
     if not no_diarize and not config.hf_token and mixdown != "dual":

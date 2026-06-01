@@ -1,5 +1,46 @@
 # Changelog
 
+## v0.12.0 — Dual-diarize: per-channel transcription + remote speaker diarization
+
+New default for stereo recordings (`--mixdown dual-diarize`).  Transcribes the
+mic and system channels **separately** — Kemal's mic stream is captured as a
+continuous "YOU" source immune to overlap with remote speakers — then runs
+**pyannote diarization on the system channel only** to split distinct remote
+speakers (Openoms, Jonas, Max, …).  Downstream voiceprint naming maps each
+SPEAKER_N to a real name, exactly as before.
+
+This eliminates the **overlap-fragmentation** problem of the mono path, where
+WhisperX's word timestamps during overlapping speech caused words to flicker
+between speakers ("This year" → Openoms, "they" → Kemal, "rented the" →
+Openoms, "whole island" → Kemal — when Kemal said the entire sentence).
+Overlapping segments from different channels are **preserved**, not
+serialized.
+
+### Added
+
+* **`--mixdown dual-diarize`** (now the **default** for stereo): dual-channel
+  ASR + system-channel diarization.  `mono` and `dual` remain available via
+  the flag.
+* **Channel-energy correction** (mono path, `--channel-correct`): per-segment
+  and per-word mic/(mic+sys) RMS reassignment for turn-boundary leaks.  On by
+  default when `--mixdown mono` is used; includes `--channel-correct-margin`
+  (default 0.30) for tuning.  Mixed segments are split at word-speaker
+  boundaries.  11 new tests.
+* **DNS-retry hardening** for `millet sync` git operations (clone/pull/push):
+  transient DNS failures auto-retry up to 5× with backoff instead of aborting.
+
+### Notes
+
+* 2× ASR cost (both channels transcribed); still fast on GPU — a 62-minute
+  meeting completes in ~3 minutes on a 3090.
+* Diarization on the isolated system channel produces a **cleaner speaker
+  signal** (no local mic bleed), improving remote-speaker clustering.
+* Minor over-segmentation of single-remote meetings (pyannote may split one
+  person into 2–3 clusters); voiceprint matching merges them.
+* Validated on DEVSTANDUP (5 speakers), LUKAS_2 (2 speakers), AB_BOARD (4
+  speakers, .ogg): the known overlap-fragmentation is eliminated and all
+  distinct remote speakers are preserved.
+
 ## v0.11.0 — Parakeet ASR backend (opt-in, English, ONNX)
 
 Adds a third ASR backend alongside `whisperx` and `mlx`: **NVIDIA Parakeet
