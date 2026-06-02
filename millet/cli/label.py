@@ -1,9 +1,42 @@
 """millet label command."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import click
+
+
+def _write_autoid_sidecar(json_path: Path, auto_matches: dict) -> None:
+    """Write voiceprint auto-ID suggestions next to the transcript JSON.
+
+    Produces ``<session>.autoid.json``:
+        {
+          "version": 1,
+          "suggestions": {
+            "SPEAKER_00": {"name": "Nancy", "confidence": 0.76},
+            ...
+          }
+        }
+
+    Keyed by the *original* speaker id (SPEAKER_NN / REMOTE_N / YOU) so a
+    labeling UI can pre-fill names regardless of whether the match was
+    applied to the transcript.  Best-effort; callers swallow errors.
+    """
+    sidecar = json_path.with_name(json_path.stem + ".autoid.json")
+    payload = {
+        "version": 1,
+        "suggestions": {
+            spk_id: {
+                "name": match.name,
+                "confidence": round(float(match.confidence), 4),
+            }
+            for spk_id, match in auto_matches.items()
+        },
+    }
+    sidecar.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
 
 
 @click.command()
@@ -218,6 +251,25 @@ def label(session_dir, no_audio, no_summary, auto, summary_preset, summary_backe
     # Interactive labeling for unrecognized speakers (or all speakers if not --auto)
     speakers_to_prompt = unrecognized if auto else speakers
 
+    # Don't prompt when there's no interactive terminal (e.g. the vezir worker
+    # runs `label --auto --no-audio` with no stdin).  Previously click.prompt
+    # hit EOF and raised Abort, which discarded the confident auto-matches that
+    # had already been collected into label_map.  In a non-interactive context
+    # we apply the auto-matches and leave unmatched speakers as their raw
+    # SPEAKER_N / REMOTE_N ids (the documented "unknowns remain as REMOTE_N"
+    # behavior), so the session can still route to needs_labeling for a human.
+    import sys
+
+    interactive = sys.stdin.isatty()
+    if speakers_to_prompt and not interactive:
+        if auto and unrecognized:
+            click.echo(
+                f"{len(unrecognized)} unrecognized speaker(s) left unlabeled "
+                "(non-interactive); applying auto-matches only."
+            )
+            click.echo()
+        speakers_to_prompt = []
+
     if speakers_to_prompt:
         if auto and unrecognized:
             click.echo(
@@ -294,6 +346,21 @@ def label(session_dir, no_audio, no_summary, auto, summary_preset, summary_backe
     click.echo("Updated files:")
     for fmt, path in result_files.items():
         click.echo(f"  {fmt}: {path}")
+
+    # ── Persist auto-id suggestions sidecar ──
+    # Record each auto-matched speaker's name + confidence, keyed by the
+    # speaker id AS IT APPEARS IN THE FINAL TRANSCRIPT (the applied name when
+    # a match was applied, else the original id).  vezir's labeling screen
+    # reads this to show match confidence and pre-fill recognized names.
+    if auto and auto_matches:
+        try:
+            final_suggestions = {
+                label_map.get(spk_id, spk_id): match
+                for spk_id, match in auto_matches.items()
+            }
+            _write_autoid_sidecar(files["json"], final_suggestions)
+        except Exception as exc:
+            click.echo(f"  (Could not write auto-id sidecar: {exc})", err=True)
 
     # ── Update voice profiles with confirmed labels ──
     # Only update profiles for speakers that were manually confirmed by the

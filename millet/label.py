@@ -53,11 +53,16 @@ def _find_session_files(session_dir: Path) -> dict[str, Path]:
     """Locate key files in a session directory. Returns dict of type -> path."""
     files: dict[str, Path] = {}
 
-    # Find JSON transcript (exclude translation, session, and summary meta files)
+    # Find JSON transcript (exclude translation, session, summary meta, and
+    # auto-id sidecar files)
     for p in sorted(session_dir.glob("*.json")):
         if ".session." in p.name:
             files["session"] = p
-        elif ".translation." not in p.name and ".summary." not in p.name:
+        elif (
+            ".translation." not in p.name
+            and ".summary." not in p.name
+            and ".autoid." not in p.name
+        ):
             files["json"] = p
 
     # Find audio file (prefer WAV if still present, fall back to OGG)

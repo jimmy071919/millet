@@ -35,10 +35,54 @@ class TestFindSessionFiles:
         files = _find_session_files(session_dir)
         assert ".translation." not in files["json"].name
 
+    def test_ignores_autoid_sidecar(self, session_dir):
+        # The auto-id sidecar must NOT be mistaken for the transcript JSON.
+        (session_dir / "meeting-20260314-100000.autoid.json").write_text(
+            '{"version": 1, "suggestions": {}}'
+        )
+        files = _find_session_files(session_dir)
+        assert ".autoid." not in files["json"].name
+
     def test_empty_dir(self, tmp_path):
         files = _find_session_files(tmp_path)
         assert "json" not in files
         assert "wav" not in files
+
+
+# ─── _write_autoid_sidecar() ───────────────────────────────────────────────
+
+
+class TestAutoidSidecar:
+    def test_writes_keyed_by_id_with_confidence(self, tmp_path):
+        from types import SimpleNamespace
+
+        from millet.cli.label import _write_autoid_sidecar
+
+        json_path = tmp_path / "meeting-20260314-100000.json"
+        json_path.write_text("{}")
+        matches = {
+            "Openoms": SimpleNamespace(name="Openoms", confidence=0.93),
+            "Kemal": SimpleNamespace(name="Kemal", confidence=0.8827),
+        }
+        _write_autoid_sidecar(json_path, matches)
+
+        sidecar = tmp_path / "meeting-20260314-100000.autoid.json"
+        assert sidecar.exists()
+        data = json.loads(sidecar.read_text())
+        assert data["version"] == 1
+        assert data["suggestions"]["Openoms"]["name"] == "Openoms"
+        assert data["suggestions"]["Openoms"]["confidence"] == 0.93
+        # confidence rounded to 4 dp
+        assert data["suggestions"]["Kemal"]["confidence"] == 0.8827
+
+    def test_empty_matches_writes_empty_suggestions(self, tmp_path):
+        from millet.cli.label import _write_autoid_sidecar
+
+        json_path = tmp_path / "m.json"
+        json_path.write_text("{}")
+        _write_autoid_sidecar(json_path, {})
+        data = json.loads((tmp_path / "m.autoid.json").read_text())
+        assert data["suggestions"] == {}
 
 
 # ─── _load_transcript() ────────────────────────────────────────────────────

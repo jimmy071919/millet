@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.12.1 — Fix auto-label discarding matches in non-interactive runs
+
+### Fixed
+
+* **`label --auto` aborted (and discarded all matches) when any speaker was
+  unmatched in a non-interactive context.**  After auto-applying confident
+  voiceprint matches, the command unconditionally prompted for unrecognized
+  speakers; in a worker/batch context (no TTY) `click.prompt` hit EOF and
+  raised `Abort`, so the already-collected confident matches were never
+  written.  Now: when stdin is not a TTY, skip the prompt — apply the
+  auto-matches and leave unmatched speakers as their raw `SPEAKER_N` ids
+  (the documented "unknowns remain as REMOTE_N" behavior).  This is the bug
+  that left fully-recognizable meetings stuck in `needs_labeling` with raw
+  speaker ids.
+
+### Added
+
+* **`*.autoid.json` sidecar** written by `label --auto`: records each
+  auto-matched speaker's name + confidence, keyed by the final transcript
+  speaker id.  Lets downstream UIs (vezir's labeling screen) pre-fill
+  recognized names and show match confidence.  Excluded from `millet sync`
+  pushes and from transcript-file resolution.
+
 ## v0.12.0 — Dual-diarize: per-channel transcription + remote speaker diarization
 
 New default for stereo recordings (`--mixdown dual-diarize`).  Transcribes the

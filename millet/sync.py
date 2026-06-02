@@ -55,6 +55,7 @@ PUSH_SUFFIXES = {".md", ".txt", ".pdf", ".srt", ".json"}
 EXCLUDE_PATTERNS = {
     ".session.json",
     ".summary.meta.json",
+    ".autoid.json",
     ".ffmpeg.log",
 }
 
