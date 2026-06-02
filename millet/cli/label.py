@@ -7,6 +7,42 @@ from pathlib import Path
 import click
 
 
+def weak_match_reason(match) -> str | None:
+    """Return a human reason a voiceprint match should NOT auto-apply, else None.
+
+    A match at/above MATCH_THRESHOLD is still suppressed when it looks like a
+    false positive:
+
+      * **Thin cluster** — less than ``MATCH_MIN_SPEECH_SECONDS`` of embeddable
+        speech (noisy embedding).
+      * **Ambiguous** — neither a strong absolute score
+        (``>= MATCH_AUTOAPPLY_CONFIDENCE``) nor a clear margin over the
+        runner-up profile (``>= MATCH_AUTOAPPLY_MARGIN``).
+
+    ``evidence_seconds`` (default 0.0) and ``margin`` (default 1.0) are
+    "trustworthy" sentinels, so matches constructed positionally by older
+    callers/tests are never gated.
+    """
+    from millet.voiceprint import (
+        MATCH_AUTOAPPLY_CONFIDENCE,
+        MATCH_AUTOAPPLY_MARGIN,
+        MATCH_MIN_SPEECH_SECONDS,
+    )
+
+    ev = getattr(match, "evidence_seconds", 0.0)
+    margin = getattr(match, "margin", 1.0)
+    if ev != 0.0 and ev < MATCH_MIN_SPEECH_SECONDS:
+        return f"only {ev:.1f}s of speech < {MATCH_MIN_SPEECH_SECONDS:.0f}s"
+    if (match.confidence < MATCH_AUTOAPPLY_CONFIDENCE
+            and margin < MATCH_AUTOAPPLY_MARGIN):
+        return (
+            f"ambiguous ({match.confidence:.0%} < "
+            f"{MATCH_AUTOAPPLY_CONFIDENCE:.0%} and margin {margin:.2f} < "
+            f"{MATCH_AUTOAPPLY_MARGIN:.2f})"
+        )
+    return None
+
+
 def _write_autoid_sidecar(json_path: Path, auto_matches: dict) -> None:
     """Write voiceprint auto-ID suggestions next to the transcript JSON.
 
@@ -233,15 +269,40 @@ def label(session_dir, no_audio, no_summary, auto, summary_preset, summary_backe
     label_map: dict[str, str] = {}
     temp_clips: list[Path] = []
 
-    # Separate speakers into auto-matched and unrecognized
-    unrecognized = [sp for sp in speakers if sp.id not in auto_matches]
+    # Gate weak matches: a barely-confident score is untrustworthy when the
+    # cluster is thin (little real speech) OR the match is ambiguous (small
+    # margin over the runner-up profile).  pyannote backchannel splits produce
+    # exactly this signature — e.g. a 0.69 match with a 0.13 margin on a noisy
+    # cluster, which mis-names a phantom speaker.  Such matches are NOT
+    # auto-applied; the speaker stays raw and routes to needs_labeling for a
+    # human.  Strong, well-separated matches (e.g. 0.93 / 0.40 margin) apply.
+    weak_matches = {
+        spk_id for spk_id, m in auto_matches.items()
+        if weak_match_reason(m) is not None
+    }
+    if weak_matches:
+        for spk_id in sorted(weak_matches):
+            m = auto_matches[spk_id]
+            click.echo(
+                f"  Skipping weak match {spk_id} -> {m.name} "
+                f"({weak_match_reason(m)}) — leaving unlabeled."
+            )
+        click.echo()
+
+    # Separate speakers into auto-matched (applicable) and unrecognized.
+    # Weak matches count as unrecognized so they stay raw.
+    applied_matches = {
+        spk_id: m for spk_id, m in auto_matches.items()
+        if spk_id not in weak_matches
+    }
+    unrecognized = [sp for sp in speakers if sp.id not in applied_matches]
 
     # Apply auto-matched labels directly
-    if auto and auto_matches:
+    if auto and applied_matches:
         click.echo("Auto-applying confident voice matches:")
         for sp in speakers:
-            if sp.id in auto_matches:
-                match = auto_matches[sp.id]
+            if sp.id in applied_matches:
+                match = applied_matches[sp.id]
                 label_map[sp.id] = match.name
                 click.echo(
                     f"  {sp.id} -> {click.style(match.name, fg='green')}  ({match.confidence:.0%})"
@@ -352,11 +413,11 @@ def label(session_dir, no_audio, no_summary, auto, summary_preset, summary_backe
     # speaker id AS IT APPEARS IN THE FINAL TRANSCRIPT (the applied name when
     # a match was applied, else the original id).  vezir's labeling screen
     # reads this to show match confidence and pre-fill recognized names.
-    if auto and auto_matches:
+    if auto and applied_matches:
         try:
             final_suggestions = {
                 label_map.get(spk_id, spk_id): match
-                for spk_id, match in auto_matches.items()
+                for spk_id, match in applied_matches.items()
             }
             _write_autoid_sidecar(files["json"], final_suggestions)
         except Exception as exc:

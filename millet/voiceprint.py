@@ -59,6 +59,23 @@ def __getattr__(name: str):
 MATCH_THRESHOLD = 0.65  # cosine similarity — below this, don't auto-label
 MIN_SEGMENT_DURATION = 1.5   # seconds — skip very short segments for embedding
 MAX_SEGMENTS_PER_SPEAKER = 10  # how many segments to average per speaker
+# Minimum embeddable speech (sum of >= MIN_SEGMENT_DURATION segments) a
+# speaker cluster must have before a voiceprint match is trustworthy enough
+# to AUTO-APPLY.  Thin clusters built from a few short backchannel utterances
+# yield noisy embeddings that match unrelated profiles by chance (e.g. a
+# 0.69 false positive); below this floor we keep the speaker raw rather than
+# confidently mislabeling it.  The match is still computed/returned so
+# diagnostics and interactive labeling can surface it.
+MATCH_MIN_SPEECH_SECONDS = 4.0
+# A match at or above MATCH_THRESHOLD is AUTO-APPLIED only if it is also
+# *unambiguous*: either its absolute confidence clears a higher auto-apply
+# floor, OR it beats the cluster's second-best profile by a clear margin.
+# This rejects the false-positive signature observed on over-segmented
+# backchannel clusters — a barely-over-threshold score (~0.69) with a tiny
+# margin (~0.13) over the runner-up — while still auto-applying strong,
+# well-separated matches (e.g. 0.93 with a 0.40 margin).
+MATCH_AUTOAPPLY_CONFIDENCE = 0.72
+MATCH_AUTOAPPLY_MARGIN = 0.15
 # Empirically tuned floor for embedding extraction.
 #
 # The purpose of this gate is to reject TRUE silence — clips where the
@@ -504,6 +521,17 @@ def enroll_session(
 class SpeakerMatch(NamedTuple):
     name: str
     confidence: float  # cosine similarity in [0, 1]
+    # Total embeddable speech (sum of >= MIN_SEGMENT_DURATION segments) backing
+    # this match, in seconds.  Callers use it to gate AUTO-APPLY: a high score
+    # on a thin cluster (little real speech) is untrustworthy.  Defaults to 0.0
+    # so older callers constructing SpeakerMatch by position keep working.
+    evidence_seconds: float = 0.0
+    # Margin = this cluster's top profile similarity minus its SECOND-best
+    # profile similarity.  A small margin means the match is ambiguous (the
+    # cluster looks nearly as much like another profile), which correlates
+    # with false positives from noisy backchannel clusters.  Defaults to 1.0
+    # ("unambiguous") so positionally-constructed matches aren't gated out.
+    margin: float = 1.0
 
 
 def identify_speakers(
@@ -547,6 +575,9 @@ def identify_speakers(
 
     # Extract embeddings for each speaker in the new transcript
     new_embeddings: dict[str, np.ndarray] = {}
+    # Embeddable speech per speaker (sum of >= MIN_SEGMENT_DURATION segments),
+    # used downstream to gate auto-apply on weak/thin clusters.
+    evidence_seconds: dict[str, float] = {}
     for speaker_id in all_ids:
         segs = [
             (seg.start, seg.end)
@@ -555,6 +586,7 @@ def identify_speakers(
         ]
         if not segs:
             continue
+        evidence_seconds[speaker_id] = float(sum(e - s for s, e in segs))
         segs.sort(key=lambda s: s[1] - s[0], reverse=True)
         selected = segs[:MAX_SEGMENTS_PER_SPEAKER]
 
@@ -593,6 +625,18 @@ def identify_speakers(
     # Cosine similarity: since both are L2-normalized, dot product = cosine similarity
     sim_matrix = new_matrix @ profile_matrix.T  # (S, P)
 
+    # Per-speaker match margin = top profile similarity − 2nd-best profile
+    # similarity (for that speaker's row).  A small margin flags an ambiguous
+    # cluster (looks nearly as much like another profile) — a common
+    # false-positive signature for noisy backchannel clusters.  With a single
+    # profile there is no runner-up, so margin is the top score itself.
+    row_margin: dict[int, float] = {}
+    for s_idx in range(sim_matrix.shape[0]):
+        row = np.sort(sim_matrix[s_idx])[::-1]
+        top = float(row[0])
+        second = float(row[1]) if row.shape[0] > 1 else 0.0
+        row_margin[s_idx] = top - second
+
     # Greedy 1:1 matching: assign best available match above threshold
     matches: dict[str, SpeakerMatch] = {}
     used_profiles: set[int] = set()
@@ -611,7 +655,12 @@ def identify_speakers(
         if speaker_id in matches or p_idx in used_profiles:
             continue
 
-        matches[speaker_id] = SpeakerMatch(name=profile_name, confidence=score)
+        matches[speaker_id] = SpeakerMatch(
+            name=profile_name,
+            confidence=score,
+            evidence_seconds=evidence_seconds.get(speaker_id, 0.0),
+            margin=row_margin.get(int(s_idx), 1.0),
+        )
         used_profiles.add(p_idx)
 
     return matches

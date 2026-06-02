@@ -170,6 +170,14 @@ from ._helpers import (
     "mic/(mic+sys) ratio must cross 0.5±margin to override its diarized side. "
     "Higher = more conservative (resists mic bleed from open speakers).",
 )
+@click.option(
+    "--consolidate-remote-clusters/--no-consolidate-remote-clusters",
+    default=True,
+    help="Consolidate over-segmented remote speakers in the dual-diarize path: "
+    "merge same-speaker clusters (voiceprint-guided) and absorb thin backchannel "
+    "clusters into the dominant remote. Fixes phantom extra speakers. On by "
+    "default; --no-consolidate-remote-clusters to disable.",
+)
 def transcribe(
     audio_file,
     model,
@@ -196,6 +204,7 @@ def transcribe(
     mixdown,
     channel_correct,
     channel_correct_margin,
+    consolidate_remote_clusters,
 ):
     """Transcribe a recorded audio file with speaker diarization."""
     from millet.transcribe import (
@@ -240,6 +249,7 @@ def transcribe(
         mixdown=mixdown,
         channel_correct=channel_correct,
         channel_correct_margin=channel_correct_margin,
+        consolidate_remote_clusters=consolidate_remote_clusters,
     )
 
     if not no_diarize and not config.hf_token and mixdown != "dual":

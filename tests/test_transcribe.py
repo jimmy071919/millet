@@ -17,6 +17,8 @@ from millet.transcribe import (
     Transcript,
     TranscriptionConfig,
     _channel_correct_segments,
+    _consolidate_remote_clusters,
+    _merge_orphan_system_segments,
     _split_segment_by_word_speaker,
     _transcribe_asr,
     _transcribe_dual_channel,
@@ -961,3 +963,124 @@ class TestChannelCorrectConfig:
 
     def test_default_margin(self):
         assert TranscriptionConfig(device="cpu").channel_correct_margin == 0.30
+
+
+# ─── remote-cluster consolidation (dual-diarize over-segmentation fix) ───────
+
+
+def _seg(start, end, speaker):
+    return {"start": start, "end": end, "speaker": speaker}
+
+
+class TestConsolidateRemoteClusters:
+    def _cfg(self, **kw):
+        base = dict(
+            device="cpu",
+            cluster_merge_similarity=0.80,
+            cluster_min_speech_seconds=8.0,
+        )
+        base.update(kw)
+        return TranscriptionConfig(**base)
+
+    def test_voiceprint_merge_high_similarity(self):
+        """Two clusters with near-identical embeddings merge into the larger."""
+        import numpy as np
+        segs = [
+            _seg(0, 30, "SPEAKER_00"),   # dominant (30s embeddable)
+            _seg(40, 50, "SPEAKER_01"),  # 10s — above absorb floor
+        ]
+        v = np.array([1.0, 0.0, 0.0])
+
+        def embed_fn(_c):
+            return v  # identical → cosine 1.0
+
+        remap = _consolidate_remote_clusters(segs, self._cfg(), embed_fn=embed_fn)
+        assert remap == {"SPEAKER_01": "SPEAKER_00"}
+
+    def test_no_merge_when_distinct(self):
+        """Genuinely-distinct embeddings (low cosine) are NOT merged."""
+        import numpy as np
+        segs = [
+            _seg(0, 30, "SPEAKER_00"),
+            _seg(40, 70, "SPEAKER_01"),  # 30s — well above absorb floor
+        ]
+        embs = {"SPEAKER_00": np.array([1.0, 0.0]), "SPEAKER_01": np.array([0.0, 1.0])}
+
+        def embed_fn(c):
+            return embs[c]
+
+        remap = _consolidate_remote_clusters(segs, self._cfg(), embed_fn=embed_fn)
+        assert remap == {}
+
+    def test_small_cluster_absorbed_by_duration(self):
+        """A thin cluster (< floor embeddable speech) is absorbed without embeddings."""
+        segs = [
+            _seg(0, 40, "SPEAKER_00"),   # 40s dominant
+            _seg(50, 53, "SPEAKER_01"),  # 3s < 8s floor
+        ]
+        remap = _consolidate_remote_clusters(segs, self._cfg(), embed_fn=None)
+        assert remap == {"SPEAKER_01": "SPEAKER_00"}
+
+    def test_large_distinct_cluster_not_absorbed_without_embeddings(self):
+        """Without embeddings, a sizable second cluster is kept (no over-merge)."""
+        segs = [
+            _seg(0, 40, "SPEAKER_00"),
+            _seg(50, 80, "SPEAKER_01"),  # 30s > floor
+        ]
+        remap = _consolidate_remote_clusters(segs, self._cfg(), embed_fn=None)
+        assert remap == {}
+
+    def test_single_cluster_noop(self):
+        segs = [_seg(0, 20, "SPEAKER_00")]
+        assert _consolidate_remote_clusters(segs, self._cfg(), embed_fn=None) == {}
+
+
+class TestMergeOrphanSystemSegments:
+    def _cfg(self, **kw):
+        return TranscriptionConfig(device="cpu", orphan_merge_max_seconds=1.0, **kw)
+
+    def test_short_orphan_attached_to_nearest(self):
+        segs = [
+            _seg(0, 10, "SPEAKER_00"),
+            _seg(10.2, 10.6, None),       # 0.4s orphan, nearest = SPEAKER_00
+            _seg(50, 60, "SPEAKER_01"),
+        ]
+        _merge_orphan_system_segments(segs, self._cfg())
+        assert segs[1]["speaker"] == "SPEAKER_00"
+
+    def test_long_orphan_left_alone(self):
+        segs = [
+            _seg(0, 10, "SPEAKER_00"),
+            _seg(20, 25, None),           # 5s > 1.0s → not merged
+        ]
+        _merge_orphan_system_segments(segs, self._cfg())
+        assert segs[1]["speaker"] is None
+
+    def test_orphan_picks_temporally_nearest(self):
+        segs = [
+            _seg(0, 10, "SPEAKER_00"),
+            _seg(55, 55.5, None),         # closer to SPEAKER_01 at 50-60
+            _seg(50, 60, "SPEAKER_01"),
+        ]
+        _merge_orphan_system_segments(segs, self._cfg())
+        assert segs[1]["speaker"] == "SPEAKER_01"
+
+    def test_no_assigned_clusters_noop(self):
+        segs = [_seg(0, 0.5, None)]
+        _merge_orphan_system_segments(segs, self._cfg())
+        assert segs[0]["speaker"] is None
+
+
+class TestConsolidationConfig:
+    def test_default_on(self):
+        assert TranscriptionConfig(device="cpu").consolidate_remote_clusters is True
+
+    def test_can_disable(self):
+        cfg = TranscriptionConfig(device="cpu", consolidate_remote_clusters=False)
+        assert cfg.consolidate_remote_clusters is False
+
+    def test_threshold_defaults(self):
+        cfg = TranscriptionConfig(device="cpu")
+        assert cfg.cluster_merge_similarity == 0.80
+        assert cfg.cluster_min_speech_seconds == 8.0
+        assert cfg.orphan_merge_max_seconds == 1.0

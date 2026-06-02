@@ -497,6 +497,32 @@ class TranscriptionConfig:
     # > (0.5 + margin).
     channel_correct_margin: float = 0.30
 
+    # ── Remote-cluster consolidation (dual-diarize path) ──
+    # pyannote sometimes over-segments a single remote stream into several
+    # clusters (e.g. splitting short backchannel "yeah/cool/awesome" off the
+    # main remote into a phantom speaker, which voiceprint matching then
+    # mis-names).  After diarizing the system channel we consolidate clusters
+    # that are almost certainly the same physical person:
+    #   * voiceprint-guided merge: two clusters whose speaker embeddings are
+    #     highly similar (cosine >= cluster_merge_similarity) are merged into
+    #     the one with the most speech.
+    #   * small-cluster absorb: a cluster with less than
+    #     cluster_min_speech_seconds of embeddable (>= MIN_SEGMENT_DURATION)
+    #     speech is absorbed into the dominant remote cluster.
+    # On by default for stereo; disable via --no-consolidate-remote-clusters.
+    consolidate_remote_clusters: bool = True
+    # Cosine-similarity threshold above which two system clusters are treated
+    # as the same speaker and merged.  Conservative so genuinely-distinct
+    # remotes who merely sound alike are not collapsed.
+    cluster_merge_similarity: float = 0.80
+    # A system cluster with less than this many seconds of embeddable speech
+    # is absorbed into the dominant remote cluster (phantom backchannel).
+    cluster_min_speech_seconds: float = 8.0
+    # Ultra-short system segments that diarization left unassigned (would
+    # otherwise become a generic REMOTE speaker) are merged into the nearest
+    # remote cluster when shorter than this many seconds.
+    orphan_merge_max_seconds: float = 1.0
+
     # Internal: set to True by __post_init__ when `device` was auto-flipped
     # to 'cpu' because the requested accelerator was unavailable.  Used to
     # produce an honest annotation in the model-load log line — distinguishes
@@ -1156,6 +1182,208 @@ def _transcribe_dual_channel(
                     pass
 
 
+def _consolidate_remote_clusters(
+    sys_segments: list,
+    config: TranscriptionConfig,
+    embed_fn=None,
+) -> dict[str, str]:
+    """Compute a speaker-id remap that consolidates over-segmented remotes.
+
+    pyannote occasionally splits one physical remote into several clusters
+    (e.g. peeling short backchannel "yeah/cool" off the main speaker into a
+    phantom).  This produces a ``{old_speaker_id: new_speaker_id}`` mapping
+    that merges:
+
+      1. **Voiceprint-guided**: two clusters whose embeddings are highly
+         similar (cosine >= ``config.cluster_merge_similarity``) are merged
+         into the one with more embeddable speech.  Requires ``embed_fn``.
+      2. **Small-cluster absorb**: a cluster with less than
+         ``config.cluster_min_speech_seconds`` of embeddable
+         (>= MIN_SEGMENT_DURATION) speech is absorbed into the dominant
+         remote cluster (the one with the most embeddable speech).
+
+    Args:
+        sys_segments: system-channel segments, each a dict-like with
+            ``start``, ``end`` and ``speaker`` (None/missing = unassigned).
+        config: transcription config (thresholds).
+        embed_fn: optional ``speaker_id -> np.ndarray | None`` returning an
+            L2-normalized embedding for that cluster.  When None, only the
+            small-cluster absorb (rule 2) runs.
+
+    Returns:
+        ``{old_id: new_id}`` for ids that should be remapped.  Ids absent
+        from the dict are unchanged.  Only real cluster ids (non-empty
+        ``speaker``) participate; unassigned segments are handled separately
+        by the orphan-merge step.
+    """
+    from millet.voiceprint import MIN_SEGMENT_DURATION
+
+    # Embeddable speech per cluster (sum of >= MIN_SEGMENT_DURATION segments).
+    speech: dict[str, float] = {}
+    for seg in sys_segments:
+        spk = seg.get("speaker")
+        if not spk:
+            continue
+        dur = float(seg["end"]) - float(seg["start"])
+        if dur >= MIN_SEGMENT_DURATION:
+            speech[spk] = speech.get(spk, 0.0) + dur
+        else:
+            speech.setdefault(spk, 0.0)
+
+    cluster_ids = sorted(speech.keys())
+    if len(cluster_ids) <= 1:
+        return {}
+
+    # Dominant cluster = most embeddable speech (tie-break: id order).
+    dominant = max(cluster_ids, key=lambda c: (speech[c], c))
+
+    # Union-find so chained merges resolve to a single representative.
+    parent = {c: c for c in cluster_ids}
+
+    def find(x: str) -> str:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a: str, b: str) -> None:
+        # Merge the cluster with less speech INTO the one with more.
+        ra, rb = find(a), find(b)
+        if ra == rb:
+            return
+        keep, drop = (ra, rb) if (speech[ra], ra) >= (speech[rb], rb) else (rb, ra)
+        parent[drop] = keep
+
+    # ── Rule 1: voiceprint-guided merge ──
+    if embed_fn is not None:
+        import numpy as np
+
+        embeddings: dict[str, Any] = {}
+        for c in cluster_ids:
+            try:
+                emb = embed_fn(c)
+            except Exception:
+                emb = None
+            if emb is not None:
+                embeddings[c] = emb
+        emb_ids = [c for c in cluster_ids if c in embeddings]
+        for i in range(len(emb_ids)):
+            for j in range(i + 1, len(emb_ids)):
+                a, b = emb_ids[i], emb_ids[j]
+                sim = float(np.dot(embeddings[a], embeddings[b]))
+                if sim >= config.cluster_merge_similarity:
+                    union(a, b)
+
+    # ── Rule 2: small-cluster absorb ──
+    # Absorb any cluster below the speech floor into the dominant cluster.
+    for c in cluster_ids:
+        if c == dominant:
+            continue
+        if speech[c] < config.cluster_min_speech_seconds:
+            union(c, dominant)
+
+    # Build the remap (only entries that actually change).
+    remap: dict[str, str] = {}
+    for c in cluster_ids:
+        root = find(c)
+        if root != c:
+            remap[c] = root
+    return remap
+
+
+def _merge_orphan_system_segments(
+    sys_segments: list,
+    config: TranscriptionConfig,
+) -> None:
+    """Attach ultra-short unassigned system segments to the nearest remote.
+
+    Diarization sometimes leaves a brief segment with no speaker; without
+    this it would surface as a generic ``REMOTE`` speaker (e.g. a 0.4s
+    "Should be." one-liner).  Such segments shorter than
+    ``config.orphan_merge_max_seconds`` are reassigned in-place to the
+    temporally-nearest assigned remote cluster.  Segments are mutated
+    (``seg["speaker"]`` set).  No-op when there are no assigned clusters.
+    """
+    assigned = [s for s in sys_segments if s.get("speaker")]
+    if not assigned:
+        return
+    for seg in sys_segments:
+        if seg.get("speaker"):
+            continue
+        dur = float(seg["end"]) - float(seg["start"])
+        if dur > config.orphan_merge_max_seconds:
+            continue
+        mid = (float(seg["start"]) + float(seg["end"])) / 2.0
+        # Nearest assigned segment by temporal gap.
+        def _gap(a) -> float:
+            if mid < float(a["start"]):
+                return float(a["start"]) - mid
+            if mid > float(a["end"]):
+                return mid - float(a["end"])
+            return 0.0
+        nearest = min(assigned, key=_gap)
+        seg["speaker"] = nearest["speaker"]
+
+
+def _consolidate_dual_diarize_speakers(
+    sys_result: dict,
+    sys_audio,
+    config: TranscriptionConfig,
+) -> None:
+    """Apply remote-cluster consolidation + orphan-merge to ``sys_result``.
+
+    Mutates ``sys_result["segments"]`` in place: remaps over-segmented
+    speaker ids (voiceprint-guided merge + small-cluster absorb) and attaches
+    ultra-short unassigned segments to the nearest remote.  Logs a summary of
+    any merges performed.  Embedding failures degrade gracefully to the
+    speech-duration heuristic only.
+    """
+    from millet import voiceprint as _vp
+
+    sys_segments = sys_result.get("segments") or []
+    if not sys_segments:
+        return
+
+    # Build an embedder over the system audio for voiceprint-guided merging.
+    embed_fn = None
+    try:
+        inference = _vp._get_inference()
+
+        def embed_fn(speaker_id: str):  # noqa: ANN001 — closure
+            segs = [
+                (float(s["start"]), float(s["end"]))
+                for s in sys_segments
+                if s.get("speaker") == speaker_id
+                and (float(s["end"]) - float(s["start"])) >= _vp.MIN_SEGMENT_DURATION
+            ]
+            if not segs:
+                return None
+            segs.sort(key=lambda t: t[1] - t[0], reverse=True)
+            return _vp._embed_segments(
+                sys_audio, 16000, segs[: _vp.MAX_SEGMENTS_PER_SPEAKER], inference
+            )
+    except Exception as exc:
+        print(f"  (embedding unavailable for consolidation: {exc}; "
+              "using speech-duration heuristic only)")
+        embed_fn = None
+
+    remap = _consolidate_remote_clusters(sys_segments, config, embed_fn=embed_fn)
+    if remap:
+        # Apply to both segment-level speaker and word-level speaker tags.
+        for seg in sys_segments:
+            spk = seg.get("speaker")
+            if spk in remap:
+                seg["speaker"] = remap[spk]
+            for w in seg.get("words") or []:
+                wspk = w.get("speaker")
+                if wspk in remap:
+                    w["speaker"] = remap[wspk]
+        merged_desc = ", ".join(f"{o}->{n}" for o, n in sorted(remap.items()))
+        print(f"  Consolidated remote clusters: {merged_desc}")
+
+    _merge_orphan_system_segments(sys_segments, config)
+
+
 def _transcribe_dual_diarize(
     audio_file: Path, config: TranscriptionConfig, duration: float
 ) -> Transcript:
@@ -1298,6 +1526,18 @@ def _transcribe_dual_diarize(
             del diarize_model
             gc.collect()
             _empty_torch_cache(torch, config.torch_device)
+
+            # ── Consolidate over-segmented remotes ──
+            # pyannote can split one physical remote into several clusters
+            # (e.g. backchannel peeled into a phantom speaker that voiceprint
+            # matching then mis-names).  Merge same-speaker clusters and
+            # absorb thin ones, then attach orphan one-liners to the nearest
+            # remote so they don't surface as a generic REMOTE.
+            if config.consolidate_remote_clusters:
+                try:
+                    _consolidate_dual_diarize_speakers(sys_result, sys_audio, config)
+                except Exception as exc:  # never fail transcription over this
+                    print(f"  Warning: remote-cluster consolidation skipped ({exc})")
         else:
             print("  Skipping remote diarization (no HF_TOKEN provided)")
             # Without diarization, all system segments become generic REMOTE.
