@@ -337,6 +337,7 @@ def apply_labels(
     summary_backend: str | None = None,
     summary_model: str | None = None,
     ollama_singlepass: bool = False,
+    summary_language: str | None = None,
     progress_callback: Any | None = None,
 ) -> dict[str, Path]:
     """Apply user-assigned speaker names to a session's outputs.
@@ -359,6 +360,12 @@ def apply_labels(
             regeneration as during the initial transcribe pass.
         summary_backend: Backend override ("ollama" or "openrouter"); None uses default.
         summary_model: Model name override; None uses the per-backend default.
+        summary_language: Optional language override for the regenerated
+            summary.  When set (e.g. "de"), the summary is generated in that
+            language and saved as an ADDITIONAL ``<basename>.summary.<lang>.md``
+            file, leaving the primary auto-detected ``<basename>.summary.md``
+            intact.  When None, the transcript's own language is used and the
+            primary summary file is (re)written.
         progress_callback: Optional callable(str) for status messages.
 
     Returns:
@@ -419,18 +426,33 @@ def apply_labels(
                 # Only free GPU for Ollama backend
                 if summary_config.backend == "ollama":
                     ensure_gpu_available()
+                # Language override → generate in that language and save as an
+                # ADDITIONAL <basename>.summary.<lang>.md (don't clobber the
+                # primary auto-detected summary).
+                effective_language = summary_language or transcript.language
+                lang_suffix = summary_language or None
                 summary_result = do_summarize(
                     transcript.to_text(), summary_config,
-                    language=transcript.language,
+                    language=effective_language,
                 )
                 from millet.frontmatter import context_from_transcript
 
                 fm_ctx = context_from_transcript(transcript, session_dir)
                 path = summary_result.save(
                     session_dir, basename, frontmatter_context=fm_ctx,
+                    lang_suffix=lang_suffix,
                 )
                 result_files["summary"] = path
-                _log(f"Summary regenerated in {summary_result.elapsed_seconds:.1f}s")
+                if lang_suffix:
+                    _log(
+                        f"Additional '{lang_suffix}' summary generated in "
+                        f"{summary_result.elapsed_seconds:.1f}s"
+                    )
+                else:
+                    _log(
+                        f"Summary regenerated in "
+                        f"{summary_result.elapsed_seconds:.1f}s"
+                    )
             else:
                 _log(_backend_not_available_message(summary_config))
                 # Fall back to find-and-replace

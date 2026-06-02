@@ -18,7 +18,9 @@ from millet.transcribe import (
     TranscriptionConfig,
     _channel_correct_segments,
     _consolidate_remote_clusters,
+    _dominant_channel_language,
     _merge_orphan_system_segments,
+    _segments_total_seconds,
     _split_segment_by_word_speaker,
     _transcribe_asr,
     _transcribe_dual_channel,
@@ -1084,3 +1086,37 @@ class TestConsolidationConfig:
         assert cfg.cluster_merge_similarity == 0.80
         assert cfg.cluster_min_speech_seconds == 8.0
         assert cfg.orphan_merge_max_seconds == 1.0
+
+
+# ─── dominant-channel language selection (summary-language fix) ──────────────
+
+
+class TestDominantChannelLanguage:
+    def test_system_wins_when_more_speech(self):
+        """Mic speaks a minority language; the system channel (more speech)
+        dictates the summary language.  (The real pt/en regression.)"""
+        mic = [{"start": 0, "end": 702}]   # pt, 702s
+        sys = [{"start": 0, "end": 1062}]  # en, 1062s
+        assert _dominant_channel_language(mic, sys, "pt", "en") == "en"
+
+    def test_mic_wins_when_more_speech(self):
+        mic = [{"start": 0, "end": 900}]
+        sys = [{"start": 0, "end": 100}]
+        assert _dominant_channel_language(mic, sys, "pt", "en") == "pt"
+
+    def test_same_language_short_circuits(self):
+        assert _dominant_channel_language([], [], "en", "en") == "en"
+
+    def test_exact_tie_prefers_mic(self):
+        mic = [{"start": 0, "end": 500}]
+        sys = [{"start": 0, "end": 500}]
+        assert _dominant_channel_language(mic, sys, "tr", "en") == "tr"
+
+    def test_none_languages_default_english(self):
+        assert _dominant_channel_language([], [], None, None) == "en"
+
+    def test_segments_total_seconds(self):
+        assert _segments_total_seconds(
+            [{"start": 0, "end": 5}, {"start": 10, "end": 12.5}]
+        ) == 7.5
+        assert _segments_total_seconds([]) == 0.0

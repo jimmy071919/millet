@@ -56,6 +56,7 @@ EXCLUDE_PATTERNS = {
     ".session.json",
     ".summary.meta.json",
     ".autoid.json",
+    ".frontmatter.json",
     ".ffmpeg.log",
 }
 
@@ -435,9 +436,15 @@ def _collect_files(session_dir: Path) -> list[tuple[Path, str]]:
             continue
 
         # Map to a descriptive destination filename
-        if f.name.endswith(".summary.md") or (
-            f.suffix == ".md" and ".summary." not in f.name
-        ):
+        if f.name.endswith(".summary.md"):
+            dest_name = "summary.md"
+        elif ".summary." in f.name and f.name.endswith(".md"):
+            # Additional per-language summary: <base>.summary.<lang>.md ->
+            # summary.<lang>.md (kept distinct from the primary summary.md).
+            stem = f.name[: -len(".md")]
+            lang = stem.rsplit(".summary.", 1)[-1]
+            dest_name = f"summary.{lang}.md" if lang else f.name
+        elif f.suffix == ".md":
             dest_name = "summary.md"
         elif f.suffix == ".txt":
             dest_name = "transcript.txt"

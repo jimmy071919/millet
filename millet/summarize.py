@@ -421,6 +421,7 @@ class MeetingSummary:
         basename: str,
         *,
         frontmatter_context: FrontmatterContext | None = None,
+        lang_suffix: str | None = None,
     ) -> Path:
         """Save the summary as a ``.summary.md`` file plus sidecars.
 
@@ -438,7 +439,13 @@ class MeetingSummary:
         backend/model produced the summary, plus per-pass timings for
         the two-pass Ollama flow.
 
-        Returns the path to the saved ``.summary.md`` file.
+        ``lang_suffix`` (e.g. ``"de"``) writes an ADDITIONAL, language-tagged
+        summary — ``<basename>.summary.de.md`` (with matching
+        ``.summary.de.meta.json`` and ``<basename>.de.frontmatter.json``
+        sidecars) — without clobbering the primary auto-detected
+        ``<basename>.summary.md``.  When ``None`` the primary filename is used.
+
+        Returns the path to the saved ``.summary[.<lang>].md`` file.
         """
         import datetime
 
@@ -452,7 +459,14 @@ class MeetingSummary:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        md_path = output_dir / f"{basename}.summary.md"
+        # A language-tagged additional summary uses a suffixed name so it
+        # coexists with the primary <basename>.summary.md.
+        suffix = f".{lang_suffix}" if lang_suffix else ""
+        md_path = output_dir / f"{basename}.summary{suffix}.md"
+        # Sidecar basename carries the suffix too (frontmatter writer appends
+        # ".frontmatter.json"), so additional-language sidecars don't clobber
+        # the primary's.
+        sidecar_basename = f"{basename}{suffix}"
 
         if frontmatter_context is not None:
             fm = build_frontmatter(
@@ -464,7 +478,7 @@ class MeetingSummary:
                 render_frontmatter_block(fm) + self.markdown,
                 encoding="utf-8",
             )
-            write_frontmatter_sidecar(output_dir, basename, fm)
+            write_frontmatter_sidecar(output_dir, sidecar_basename, fm)
         else:
             md_path.write_text(self.markdown, encoding="utf-8")
 
@@ -484,7 +498,7 @@ class MeetingSummary:
             meta["data_error"] = self.data_error
         elif self.data is not None:
             meta["data_extracted"] = True
-        meta_path = output_dir / f"{basename}.summary.meta.json"
+        meta_path = output_dir / f"{basename}.summary{suffix}.meta.json"
         meta_path.write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
 
         return md_path

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import wave
+from unittest.mock import patch
 
 import numpy as np
 
@@ -387,3 +388,58 @@ class TestApplyLabels:
         )
         txt = (session_dir / "meeting-20260314-100000.txt").read_text()
         assert "Alice:" in txt
+
+
+class TestApplyLabelsSummaryLanguage:
+    """summary_language override writes an ADDITIONAL <name>.summary.<lang>.md
+    without clobbering the primary <name>.summary.md."""
+
+    def _fake_summary(self):
+        from millet.summarize import MeetingSummary
+        return MeetingSummary(
+            markdown="## Zusammenfassung\nEin Test.",
+            backend="test",
+            model="test-model",
+            elapsed_seconds=0.1,
+            data=None,
+            data_error=None,
+        )
+
+    def test_language_override_creates_additional_file(self, session_dir):
+        basename = "meeting-20260314-100000"
+        primary = session_dir / f"{basename}.summary.md"
+        primary_before = primary.read_text()
+
+        with patch("millet.summarize.is_backend_available", return_value=True), \
+             patch("millet.summarize.summarize", return_value=self._fake_summary()), \
+             patch("millet.transcribe.ensure_gpu_available", lambda *a, **k: None):
+            apply_labels(
+                session_dir,
+                {},
+                regenerate_summary=True,
+                summary_language="de",
+            )
+
+        # Additional language file created…
+        de = session_dir / f"{basename}.summary.de.md"
+        assert de.exists()
+        assert "Zusammenfassung" in de.read_text()
+        # …and its sidecars are suffixed (don't clobber the primary's).
+        assert (session_dir / f"{basename}.summary.de.meta.json").exists()
+        assert (session_dir / f"{basename}.de.frontmatter.json").exists()
+        # Primary summary is untouched.
+        assert primary.read_text() == primary_before
+
+    def test_no_language_writes_primary(self, session_dir):
+        basename = "meeting-20260314-100000"
+        with patch("millet.summarize.is_backend_available", return_value=True), \
+             patch("millet.summarize.summarize", return_value=self._fake_summary()), \
+             patch("millet.transcribe.ensure_gpu_available", lambda *a, **k: None):
+            apply_labels(
+                session_dir,
+                {},
+                regenerate_summary=True,
+            )
+        # No language → primary rewritten, no .summary.<lang>.md created.
+        assert (session_dir / f"{basename}.summary.md").exists()
+        assert not list(session_dir.glob(f"{basename}.summary.??.md"))

@@ -1056,10 +1056,10 @@ def _transcribe_dual_channel(
             mic_audio, config, whisper_lang, whisperx_model=asr_model
         )
 
-        # Resolve language from first transcription result
-        detected_language = mic_result.get("language", whisper_lang or "en")
+        # Resolve language from the mic transcription result
+        mic_lang = mic_result.get("language", whisper_lang or "en")
         if config.language == "auto":
-            print(f"  Detected language: {detected_language}")
+            print(f"  Detected mic language: {mic_lang}")
 
         # ── Transcribe system channel ──
         print("  Transcribing system channel (right)...")
@@ -1071,6 +1071,9 @@ def _transcribe_dual_channel(
         sys_result = _transcribe_asr(
             sys_audio, config, whisper_lang, whisperx_model=asr_model
         )
+        sys_lang = sys_result.get("language", whisper_lang or "en")
+        if config.language == "auto":
+            print(f"  Detected system language: {sys_lang}")
 
         if asr_model is not None:
             del asr_model
@@ -1080,47 +1083,24 @@ def _transcribe_dual_channel(
         gc.collect()
         _empty_torch_caches(torch, config)
 
-        # ── Align both channels ──
-        if config.skip_alignment:
-            print("  Skipping alignment (--skip-alignment)")
-        elif detected_language in ALIGNMENT_MODELS and not check_alignment_model_cached(
-            detected_language
-        ):
-            gc.collect()
-            _empty_torch_cache(torch, config.torch_device)
-            raise AlignmentModelMissing(detected_language)
-        else:
-            print(f"  Aligning word timestamps ({detected_language})...")
-            try:
-                model_a, metadata = whisperx.load_align_model(
-                    language_code=detected_language,
-                    device=config.torch_device,
-                )
-                mic_result = whisperx.align(
-                    mic_result["segments"],
-                    model_a,
-                    metadata,
-                    mic_audio,
-                    config.torch_device,
-                    return_char_alignments=False,
-                )
-                sys_result = whisperx.align(
-                    sys_result["segments"],
-                    model_a,
-                    metadata,
-                    sys_audio,
-                    config.torch_device,
-                    return_char_alignments=False,
-                )
-                del model_a
-                gc.collect()
-                _empty_torch_cache(torch, config.torch_device)
-            except Exception as align_exc:
-                if detected_language in ALIGNMENT_MODELS:
-                    raise AlignmentModelMissing(detected_language) from align_exc
-                print(
-                    f"  Warning: alignment failed ({align_exc}), continuing without word-level timestamps"
-                )
+        # Transcript/summary language = the channel with the most speech
+        # (the mic/local speaker may speak only a minority language).
+        detected_language = _dominant_channel_language(
+            mic_result.get("segments", []),
+            sys_result.get("segments", []),
+            mic_lang,
+            sys_lang,
+        )
+        if config.language == "auto":
+            print(f"  Summary/transcript language: {detected_language}")
+
+        # ── Align each channel with its OWN detected language ──
+        mic_result = _align_channel(
+            mic_result, mic_audio, mic_lang, config, torch, whisperx
+        )
+        sys_result = _align_channel(
+            sys_result, sys_audio, sys_lang, config, torch, whisperx
+        )
 
         # ── Merge segments ──
         max_t = duration if duration and duration > 0 else float("inf")
@@ -1180,6 +1160,81 @@ def _transcribe_dual_channel(
                     p.unlink()
                 except OSError:
                     pass
+
+
+def _segments_total_seconds(segments: list) -> float:
+    """Total speech duration across a list of segments (start/end dicts)."""
+    return float(sum(max(0.0, float(s["end"]) - float(s["start"])) for s in segments))
+
+
+def _dominant_channel_language(
+    mic_segments: list,
+    sys_segments: list,
+    mic_lang: str | None,
+    sys_lang: str | None,
+) -> str:
+    """Pick the transcript/summary language from the channel with more speech.
+
+    In the dual-channel paths each channel is transcribed (and its language
+    detected) independently.  The mic channel is the local speaker, who may
+    speak a *minority* language (e.g. a few Portuguese asides), while the bulk
+    of the meeting is on the system channel in another language.  Choosing the
+    language by total speech duration keeps the summary in the meeting's
+    dominant language instead of the local speaker's incidental one.
+
+    Ties (or a missing language) fall back to the mic language, then English.
+    """
+    mic_lang = mic_lang or "en"
+    sys_lang = sys_lang or "en"
+    if mic_lang == sys_lang:
+        return mic_lang
+    mic_s = _segments_total_seconds(mic_segments)
+    sys_s = _segments_total_seconds(sys_segments)
+    # Dominant by speech duration; mic wins exact ties (local speaker default).
+    return sys_lang if sys_s > mic_s else mic_lang
+
+
+def _align_channel(result, audio, lang, config, torch, whisperx):
+    """Align one channel's segments with its OWN detected language model.
+
+    Returns the aligned result (or the original on non-fatal failure).  Raises
+    AlignmentModelMissing when the language has a known alignment model that
+    isn't cached (so the caller can prompt a download) — matching the prior
+    single-channel behavior.
+    """
+    if config.skip_alignment:
+        return result
+    if lang in ALIGNMENT_MODELS and not check_alignment_model_cached(lang):
+        gc.collect()
+        _empty_torch_cache(torch, config.torch_device)
+        raise AlignmentModelMissing(lang)
+    try:
+        model_a, metadata = whisperx.load_align_model(
+            language_code=lang,
+            device=config.torch_device,
+        )
+        aligned = whisperx.align(
+            result["segments"],
+            model_a,
+            metadata,
+            audio,
+            config.torch_device,
+            return_char_alignments=False,
+        )
+        del model_a
+        gc.collect()
+        _empty_torch_cache(torch, config.torch_device)
+        return aligned
+    except AlignmentModelMissing:
+        raise
+    except Exception as align_exc:
+        if lang in ALIGNMENT_MODELS:
+            raise AlignmentModelMissing(lang) from align_exc
+        print(
+            f"  Warning: alignment failed for '{lang}' ({align_exc}), "
+            "continuing without word-level timestamps"
+        )
+        return result
 
 
 def _consolidate_remote_clusters(
@@ -1439,9 +1494,9 @@ def _transcribe_dual_diarize(
             mic_audio, config, whisper_lang, whisperx_model=asr_model
         )
 
-        detected_language = mic_result.get("language", whisper_lang or "en")
+        mic_lang = mic_result.get("language", whisper_lang or "en")
         if config.language == "auto":
-            print(f"  Detected language: {detected_language}")
+            print(f"  Detected mic language: {mic_lang}")
 
         # ── Transcribe system channel (remotes) ──
         print("  Transcribing system channel (right / remotes)...")
@@ -1453,6 +1508,9 @@ def _transcribe_dual_diarize(
         sys_result = _transcribe_asr(
             sys_audio, config, whisper_lang, whisperx_model=asr_model
         )
+        sys_lang = sys_result.get("language", whisper_lang or "en")
+        if config.language == "auto":
+            print(f"  Detected system language: {sys_lang}")
 
         if asr_model is not None:
             del asr_model
@@ -1461,48 +1519,25 @@ def _transcribe_dual_diarize(
         gc.collect()
         _empty_torch_caches(torch, config)
 
-        # ── Align both channels ──
-        if config.skip_alignment:
-            print("  Skipping alignment (--skip-alignment)")
-        elif detected_language in ALIGNMENT_MODELS and not check_alignment_model_cached(
-            detected_language
-        ):
-            gc.collect()
-            _empty_torch_cache(torch, config.torch_device)
-            raise AlignmentModelMissing(detected_language)
-        else:
-            print(f"  Aligning word timestamps ({detected_language})...")
-            try:
-                model_a, metadata = whisperx.load_align_model(
-                    language_code=detected_language,
-                    device=config.torch_device,
-                )
-                mic_result = whisperx.align(
-                    mic_result["segments"],
-                    model_a,
-                    metadata,
-                    mic_audio,
-                    config.torch_device,
-                    return_char_alignments=False,
-                )
-                sys_result = whisperx.align(
-                    sys_result["segments"],
-                    model_a,
-                    metadata,
-                    sys_audio,
-                    config.torch_device,
-                    return_char_alignments=False,
-                )
-                del model_a
-                gc.collect()
-                _empty_torch_cache(torch, config.torch_device)
-            except Exception as align_exc:
-                if detected_language in ALIGNMENT_MODELS:
-                    raise AlignmentModelMissing(detected_language) from align_exc
-                print(
-                    f"  Warning: alignment failed ({align_exc}), "
-                    "continuing without word-level timestamps"
-                )
+        # Transcript/summary language = the channel with the most speech.  The
+        # mic (local speaker) may speak a minority language; the meeting's
+        # dominant language usually lives on the system channel.
+        detected_language = _dominant_channel_language(
+            mic_result.get("segments", []),
+            sys_result.get("segments", []),
+            mic_lang,
+            sys_lang,
+        )
+        if config.language == "auto":
+            print(f"  Summary/transcript language: {detected_language}")
+
+        # ── Align each channel with its OWN detected language ──
+        mic_result = _align_channel(
+            mic_result, mic_audio, mic_lang, config, torch, whisperx
+        )
+        sys_result = _align_channel(
+            sys_result, sys_audio, sys_lang, config, torch, whisperx
+        )
 
         # ── Diarize system channel (split remotes) ──
         if config.hf_token:
