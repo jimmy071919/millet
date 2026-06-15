@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.12.8 — Correct no-headphones mic crosstalk in the dual-diarize path
+
+### Fixed
+
+* **Remote speech bled into the mic channel was attributed to the local
+  speaker.**  When a meeting is recorded WITHOUT headphones, the remote
+  participants' audio played through the room speakers leaks into the
+  microphone (left) channel.  The default `dual-diarize` path labels the
+  entire mic channel as the local speaker (`YOU`), so a large share of those
+  segments were echoes of remote speech misattributed to the local speaker.
+  New `_correct_mic_bleed_segments` (invoked from `_transcribe_dual_diarize`,
+  gated on `channel_correct`, on by default) detects bled segments by
+  per-segment / per-word channel energy and near-duplicate echo matching, and
+  **reassigns them to the diarized remote speaker that overlaps them in time**
+  (or a generic `REMOTE` fallback), dropping empty/punctuation-only mic
+  artifacts.  Genuine local speech (mic-dominant, no remote twin) is left as
+  `YOU`, so the correction is conservative and never invents or merges named
+  remote speakers.  Disable with `--no-channel-correct`.
+
 ## v0.12.7 — Single-source path: keep diarized in-room speakers
 
 ### Fixed

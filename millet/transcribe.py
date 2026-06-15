@@ -1802,7 +1802,8 @@ def _transcribe_dual_diarize(
 
         # ── Build segments ──
         max_t = duration if duration and duration > 0 else float("inf")
-        segments: list[Segment] = []
+        mic_segments: list[Segment] = []
+        sys_segments: list[Segment] = []
         remote_speaker_ids: set[str] = set()
 
         # Mic → all YOU
@@ -1811,7 +1812,7 @@ def _transcribe_dual_diarize(
             seg_end = min(seg["end"], max_t)
             if seg_end <= seg_start:
                 continue
-            segments.append(
+            mic_segments.append(
                 Segment(
                     start=seg_start,
                     end=seg_end,
@@ -1829,7 +1830,7 @@ def _transcribe_dual_diarize(
                 continue
             speaker = seg.get("speaker") or "REMOTE"
             remote_speaker_ids.add(speaker)
-            segments.append(
+            sys_segments.append(
                 Segment(
                     start=seg_start,
                     end=seg_end,
@@ -1839,7 +1840,32 @@ def _transcribe_dual_diarize(
                 )
             )
 
+        # ── Correct mic-channel crosstalk (no-headphones bleed) ──
+        # Without echo cancellation the remote audio leaks into the mic, so a
+        # large share of the "YOU" segments are echoes of remote speech.
+        # Reassign those system-dominant / echo-duplicate mic segments to the
+        # overlapping remote speaker so they aren't misattributed to the local
+        # speaker.  Gated on channel_correct so it can be disabled with
+        # --no-channel-correct.
+        if config.channel_correct and mic_segments:
+            try:
+                mic_segments = _correct_mic_bleed_segments(
+                    audio_file,
+                    mic_segments,
+                    sys_segments,
+                    margin=config.channel_correct_margin,
+                )
+            except Exception as exc:  # never fail transcription over this
+                print(f"  Warning: mic-bleed correction skipped ({exc})")
+
+        segments: list[Segment] = mic_segments + sys_segments
         segments.sort(key=lambda s: s.start)
+        # Reassignment may have introduced remote labels onto former mic
+        # segments — make sure they're registered as speakers.
+        remote_speaker_ids.update(
+            s.speaker for s in mic_segments
+            if s.speaker and s.speaker != "YOU"
+        )
 
         speakers = [Speaker(id="YOU", label="YOU")]
         for sid in sorted(remote_speaker_ids):
@@ -2404,6 +2430,127 @@ def _channel_correct_segments(
             new_speakers.append(Speaker(id=lbl, label=lbl))
     _ = np  # numpy used via _seg_channel_ratio
     return out_segments, new_speakers
+
+
+def _norm_dup_text(text: str | None) -> str:
+    """Normalise text for the echo-duplicate comparison in bleed removal."""
+    import re
+
+    return re.sub(r"[^a-z0-9 ]", "", (text or "").lower()).strip()
+
+
+def _correct_mic_bleed_segments(
+    stereo_file: Path,
+    mic_segments: list[Segment],
+    sys_segments: list[Segment],
+    remote_fallback: str = "REMOTE",
+    margin: float = 0.30,
+    word_sys_frac: float = 0.60,
+    dup_sim: float = 0.70,
+) -> list[Segment]:
+    """Reassign mic-channel ("YOU") segments that are actually remote bleed.
+
+    The ``dual-diarize`` path labels the entire mic channel as the local
+    speaker.  When the meeting was recorded WITHOUT headphones, the remote
+    audio played through the room speakers leaks into the mic, so a large
+    fraction of those "YOU" segments are echoes of remote speech.
+
+    A mic segment is treated as remote bleed when ANY of:
+
+    * its whole-segment mic/(mic+sys) energy ratio is strongly system-dominant
+      (``< 0.5 - margin``) — unambiguous bleed;
+    * at least ``word_sys_frac`` of its words are individually system-dominant;
+    * its text closely matches (``>= dup_sim``) a temporally overlapping remote
+      segment — a delayed echo of what a remote actually said.
+
+    Bled segments are **reassigned to the diarized remote speaker that overlaps
+    them in time** (or ``remote_fallback`` when none does), preserving the
+    content with correct attribution instead of attributing it to YOU.  Empty /
+    punctuation-only mic artifacts are dropped.  Genuine local speech
+    (mic-dominant words, no remote twin) is left as YOU, so the correction is
+    conservative and never invents or merges named remote speakers.
+
+    Returns the corrected list of segments (YOU + reassigned), excluding empties.
+    """
+    import difflib
+
+    from millet.audio import read_stereo_channels
+
+    if not mic_segments:
+        return mic_segments
+
+    stereo = read_stereo_channels(stereo_file)
+    if stereo is None:
+        return mic_segments
+
+    mic = stereo.mic
+    sys_ = stereo.system
+    sr = stereo.sample_rate
+    n = len(mic)
+    lo = 0.5 - margin
+
+    # Pre-normalise remote text + keep timing for the echo check.
+    remote_norm = [
+        (s.start, s.end, _norm_dup_text(s.text)) for s in sys_segments
+    ]
+
+    def _is_echo(seg: Segment) -> bool:
+        t0 = _norm_dup_text(seg.text)
+        if len(t0) < 4:
+            return False
+        for r_start, r_end, r_text in remote_norm:
+            if r_end < seg.start - 8.0 or r_start > seg.end + 8.0:
+                continue
+            if difflib.SequenceMatcher(None, t0, r_text).ratio() >= dup_sim:
+                return True
+        return False
+
+    def _word_sys_fraction(seg: Segment) -> float | None:
+        flags: list[bool] = []
+        for w in seg.words or []:
+            r = _seg_channel_ratio(mic, sys_, w.get("start"), w.get("end"), sr, n)
+            if r is not None:
+                flags.append(r < 0.5)
+        if not flags:
+            return None
+        return sum(flags) / len(flags)
+
+    def _overlapping_remote(seg: Segment) -> str | None:
+        best = None
+        best_ov = 0.3  # require > 0.3s overlap
+        for s in sys_segments:
+            ov = min(seg.end, s.end) - max(seg.start, s.start)
+            if ov > best_ov and s.speaker:
+                best_ov = ov
+                best = s.speaker
+        return best
+
+    out: list[Segment] = []
+    reassigned = 0
+    dropped = 0
+    for seg in mic_segments:
+        if not _norm_dup_text(seg.text):
+            dropped += 1
+            continue
+        seg_ratio = _seg_channel_ratio(mic, sys_, seg.start, seg.end, sr, n)
+        wsf = _word_sys_fraction(seg)
+        is_bleed = (
+            (seg_ratio is not None and seg_ratio < lo)
+            or (wsf is not None and wsf >= word_sys_frac)
+            or _is_echo(seg)
+        )
+        if is_bleed:
+            seg.speaker = _overlapping_remote(seg) or remote_fallback
+            reassigned += 1
+        out.append(seg)
+
+    if reassigned or dropped:
+        print(
+            f"  Mic-bleed correction: reassigned {reassigned} of "
+            f"{len(mic_segments)} local segment(s) to remote crosstalk, "
+            f"dropped {dropped} empty"
+        )
+    return out
 
 
 def _split_segment_by_word_speaker(

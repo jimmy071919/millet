@@ -19,6 +19,7 @@ from millet.transcribe import (
     _apply_default_language_bias,
     _channel_correct_segments,
     _consolidate_remote_clusters,
+    _correct_mic_bleed_segments,
     _dominant_channel_language,
     _merge_orphan_system_segments,
     _nearest_segment,
@@ -1045,6 +1046,75 @@ class TestChannelCorrect:
             wav, segs, [Speaker(id="Kemal")], margin=0.30
         )
         assert out[0].speaker == "Kemal"
+
+
+class TestCorrectMicBleedSegments:
+    """No-headphones bleed correction for the dual-diarize mic channel.
+
+    Bled 'YOU' segments are reassigned to the overlapping remote speaker
+    (or a generic fallback), not dropped; empties are dropped.
+    """
+
+    def test_system_dominant_mic_segment_reassigned_to_overlapping_remote(
+        self, tmp_path
+    ):
+        """A 'YOU' segment on the system channel is reassigned to that remote."""
+        wav = _write_stereo(
+            tmp_path / "m.wav",
+            [(0.0, 2.0, "mic"), (2.0, 4.0, "sys")],  # 2nd is bled remote
+        )
+        mic_segs = [
+            Segment(0.0, 2.0, "genuine local", speaker="YOU"),
+            Segment(2.0, 4.0, "bled remote", speaker="YOU"),
+        ]
+        sys_segs = [Segment(2.0, 4.0, "remote speech", speaker="Openoms")]
+        out = _correct_mic_bleed_segments(wav, mic_segs, sys_segs, margin=0.30)
+        by_text = {s.text: s.speaker for s in out}
+        assert by_text["genuine local"] == "YOU"
+        assert by_text["bled remote"] == "Openoms"  # reassigned, not dropped
+
+    def test_bled_segment_without_overlap_uses_fallback(self, tmp_path):
+        """A bled 'YOU' segment with no overlapping remote -> generic fallback."""
+        wav = _write_stereo(tmp_path / "m.wav", [(0.0, 2.0, "sys")])
+        mic_segs = [Segment(0.0, 2.0, "bled remote", speaker="YOU")]
+        out = _correct_mic_bleed_segments(
+            wav, mic_segs, sys_segments=[], remote_fallback="REMOTE", margin=0.30
+        )
+        assert [(s.text, s.speaker) for s in out] == [("bled remote", "REMOTE")]
+
+    def test_genuine_local_segment_kept(self, tmp_path):
+        """A clearly mic-dominant local segment stays YOU."""
+        wav = _write_stereo(tmp_path / "m.wav", [(0.0, 2.0, "mic")])
+        mic_segs = [Segment(0.0, 2.0, "hello team", speaker="YOU")]
+        out = _correct_mic_bleed_segments(wav, mic_segs, sys_segments=[], margin=0.30)
+        assert [(s.text, s.speaker) for s in out] == [("hello team", "YOU")]
+
+    def test_echo_duplicate_of_remote_reassigned(self, tmp_path):
+        """A mic segment echoing an overlapping remote segment is reassigned."""
+        # Mic-dominant audio (energy alone would keep it), but the text is a
+        # near-duplicate of a remote segment at the same time -> echo.
+        wav = _write_stereo(tmp_path / "m.wav", [(0.0, 3.0, "mic")])
+        mic_segs = [
+            Segment(0.0, 3.0, "the servers now to control", speaker="YOU"),
+        ]
+        sys_segs = [
+            Segment(0.2, 3.2, "the servers now to control", speaker="Openoms"),
+        ]
+        out = _correct_mic_bleed_segments(wav, mic_segs, sys_segs, margin=0.30)
+        assert [(s.text, s.speaker) for s in out] == [
+            ("the servers now to control", "Openoms")
+        ]
+
+    def test_empty_segment_dropped(self, tmp_path):
+        """Punctuation-only mic artifacts are removed."""
+        wav = _write_stereo(tmp_path / "m.wav", [(0.0, 1.0, "mic")])
+        mic_segs = [Segment(0.0, 1.0, " . ", speaker="YOU")]
+        out = _correct_mic_bleed_segments(wav, mic_segs, sys_segments=[], margin=0.30)
+        assert out == []
+
+    def test_no_segments_noop(self, tmp_path):
+        wav = _write_stereo(tmp_path / "m.wav", [(0.0, 1.0, "mic")])
+        assert _correct_mic_bleed_segments(wav, [], sys_segments=[]) == []
 
 
 class TestSplitSegmentByWordSpeaker:
