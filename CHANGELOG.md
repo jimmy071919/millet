@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.12.10 — Robust transcript-JSON discovery in `label`
+
+### Fixed
+
+* **`millet label` could pick the wrong JSON and crash with
+  `KeyError: 'segments'`.**  `_find_session_files` chose the transcript via
+  "last sorted `*.json` wins" with an incomplete exclusion list: it did not
+  exclude `*.frontmatter.json`, nor a **bare `session.json`** (vezir writes
+  one on pull; its name lacks the `.session.` substring the old check looked
+  for).  On a vezir-pulled directory (`transcript.json` + `session.json` +
+  `frontmatter.json`), `session.json` sorts last and was selected as the
+  transcript → crash.  Selection is now deterministic: frontmatter,
+  translation, summary-meta, auto-id, and both session-metadata forms are
+  excluded, then the canonical `transcript.json` is preferred, then
+  `<dirname>.json`, then the first remaining candidate.  A bare `session.json`
+  is also routed to `files["session"]`.
+
+  Note: the vezir **server worker** was never affected (it transcribes/labels
+  with ULID-stem names where `<id>.frontmatter.json` sorts before `<id>.json`,
+  and never writes a bare `session.json`); this only bit manual `millet label`
+  runs on pulled/client directories.
+
 ## v0.12.9 — Force the default-language-biased decode language per channel
 
 ### Fixed

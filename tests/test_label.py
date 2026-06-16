@@ -49,6 +49,49 @@ class TestFindSessionFiles:
         assert "json" not in files
         assert "wav" not in files
 
+    def test_ignores_frontmatter_json(self, session_dir):
+        # The frontmatter sidecar has no "segments" and must NOT be the json.
+        (session_dir / "meeting-20260314-100000.frontmatter.json").write_text(
+            '{"schema_version": 1}'
+        )
+        files = _find_session_files(session_dir)
+        assert ".frontmatter." not in files["json"].name
+
+    def test_ignores_bare_session_json(self, tmp_path):
+        # A vezir-pulled dir: friendly transcript.json + a bare session.json
+        # (whose name lacks the ``.session.`` substring) + frontmatter.json.
+        # session.json sorts LAST but must not shadow the transcript.
+        (tmp_path / "transcript.json").write_text(
+            '{"segments": [], "speakers": []}'
+        )
+        (tmp_path / "session.json").write_text('{"session_id": "X"}')
+        (tmp_path / "frontmatter.json").write_text('{"schema_version": 1}')
+        files = _find_session_files(tmp_path)
+        assert files["json"].name == "transcript.json"
+        assert files["session"].name == "session.json"
+
+    def test_prefers_transcript_json_over_late_sorting_sidecars(self, tmp_path):
+        # Even with several non-transcript JSONs that sort after it, the
+        # canonical transcript.json is selected.
+        (tmp_path / "transcript.json").write_text(
+            '{"segments": [], "speakers": []}'
+        )
+        (tmp_path / "zzz.summary.meta.json").write_text("{}")
+        (tmp_path / "session.json").write_text("{}")
+        files = _find_session_files(tmp_path)
+        assert files["json"].name == "transcript.json"
+
+    def test_prefers_dirname_json(self, tmp_path):
+        # Server stem convention: <dirname>.json wins over a generic decoy.
+        sd = tmp_path / "meeting-20260314-100000"
+        sd.mkdir()
+        (sd / "meeting-20260314-100000.json").write_text(
+            '{"segments": [], "speakers": []}'
+        )
+        (sd / "meeting-20260314-100000.frontmatter.json").write_text("{}")
+        files = _find_session_files(sd)
+        assert files["json"].name == "meeting-20260314-100000.json"
+
 
 # ─── _write_autoid_sidecar() ───────────────────────────────────────────────
 

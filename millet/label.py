@@ -53,17 +53,35 @@ def _find_session_files(session_dir: Path) -> dict[str, Path]:
     """Locate key files in a session directory. Returns dict of type -> path."""
     files: dict[str, Path] = {}
 
-    # Find JSON transcript (exclude translation, session, summary meta, and
-    # auto-id sidecar files)
+    # Find the JSON transcript.  Exclude sidecar/metadata JSONs that are NOT
+    # the transcript: session metadata (both ``<stem>.session.json`` and a bare
+    # ``session.json`` written by vezir on pull), frontmatter, translations,
+    # summary meta, and the auto-id sidecar.  Selection is then deterministic
+    # (not "last sorted wins"): prefer the canonical ``transcript.json`` (the
+    # vezir-pulled friendly name), then ``<dirname>.json`` (the worker's stem
+    # convention), else the first remaining candidate — so a lexicographically
+    # later sidecar (e.g. ``session.json``) can never shadow the real transcript.
+    json_candidates: list[Path] = []
     for p in sorted(session_dir.glob("*.json")):
-        if ".session." in p.name:
+        if p.name == "session.json" or ".session." in p.name:
             files["session"] = p
-        elif (
-            ".translation." not in p.name
-            and ".summary." not in p.name
-            and ".autoid." not in p.name
+            continue
+        if (
+            ".frontmatter." in p.name
+            or ".translation." in p.name
+            or ".summary." in p.name
+            or ".autoid." in p.name
         ):
-            files["json"] = p
+            continue
+        json_candidates.append(p)
+
+    if json_candidates:
+        by_name = {p.name: p for p in json_candidates}
+        files["json"] = (
+            by_name.get("transcript.json")
+            or by_name.get(f"{session_dir.name}.json")
+            or json_candidates[0]
+        )
 
     # Find audio file (prefer WAV if still present, fall back to OGG)
     wavs = sorted(session_dir.glob("*.wav"))
