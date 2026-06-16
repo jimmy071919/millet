@@ -23,6 +23,7 @@ from millet.transcribe import (
     _dominant_channel_language,
     _merge_orphan_system_segments,
     _nearest_segment,
+    _resolve_channel_language,
     _segment_gap,
     _segments_total_seconds,
     _split_segment_by_word_speaker,
@@ -725,9 +726,11 @@ class TestWhisperXAsrBackend:
         class FakeModel:
             def __init__(self):
                 self.calls = 0
+                self.languages = []
 
-            def transcribe(self, audio, batch_size):
+            def transcribe(self, audio, batch_size, language=None):
                 self.calls += 1
+                self.languages.append(language)
                 return {
                     "language": "en",
                     "segments": [
@@ -759,6 +762,12 @@ class TestWhisperXAsrBackend:
         )
         monkeypatch.setitem(sys.modules, "torch", SimpleNamespace())
         monkeypatch.setattr("millet.transcribe._extract_mono", fake_extract_mono)
+        # The per-channel language resolution runs multi-window detection on the
+        # whisperx backend; stub it so the test stays focused on model reuse.
+        monkeypatch.setattr(
+            "millet.transcribe._detect_language_multiwindow",
+            lambda model, audio, config: ("en", 0.99),
+        )
 
         config = TranscriptionConfig(
             asr_backend="whisperx",
@@ -773,6 +782,8 @@ class TestWhisperXAsrBackend:
         assert len(model_loads) == 1
         assert fake_model.calls == 2
         assert len(audio_loads) == 2
+        # Both channels decoded with the resolved language (en).
+        assert fake_model.languages == ["en", "en"]
         assert [segment.speaker for segment in transcript.segments] == [
             "YOU",
             "REMOTE",
@@ -1352,3 +1363,60 @@ class TestDefaultLanguageBias:
         assert cfg.default_language is None
         assert cfg.language_detection_segments == 6
         assert cfg.default_language_override_confidence == 0.70
+
+
+class TestResolveChannelLanguage:
+    """The decode language forced into the ASR must honor the default bias.
+
+    This is the fix for English audio being transcribed as Spanish: a
+    low-confidence minority detection on a channel must be overridden by the
+    team default BEFORE the ASR decode, not just in the metadata.
+    """
+
+    def _cfg(self, **kw):
+        return TranscriptionConfig(
+            device="cpu",
+            default_language="en",
+            default_language_override_confidence=0.70,
+            **kw,
+        )
+
+    def test_low_confidence_minority_forces_default_decode(self):
+        """es@0.50 on an en-default team -> decode the channel as en."""
+        with patch(
+            "millet.transcribe._detect_language_multiwindow",
+            return_value=("es", 0.50),
+        ):
+            reported, conf, decode = _resolve_channel_language(
+                object(), object(), self._cfg(), None, "system"
+            )
+        assert reported == "es"      # raw detection preserved for reference
+        assert conf == 0.50
+        assert decode == "en"        # but the ASR is forced to English
+
+    def test_high_confidence_minority_decodes_in_minority(self):
+        """A genuinely Spanish channel detected confidently is decoded as es."""
+        with patch(
+            "millet.transcribe._detect_language_multiwindow",
+            return_value=("es", 0.90),
+        ):
+            _reported, _conf, decode = _resolve_channel_language(
+                object(), object(), self._cfg(), None, "system"
+            )
+        assert decode == "es"
+
+    def test_explicit_language_forces_everywhere(self):
+        """--language en (not auto) forces the decode regardless of audio."""
+        cfg = TranscriptionConfig(device="cpu", language="en")
+        reported, conf, decode = _resolve_channel_language(
+            object(), object(), cfg, "en", "mic"
+        )
+        assert reported == "en"
+        assert decode == "en"
+
+    def test_no_model_uses_default_decode(self):
+        """Without a whisperx model to pre-detect, force the team default."""
+        reported, conf, decode = _resolve_channel_language(
+            None, object(), self._cfg(), None, "audio"
+        )
+        assert decode == "en"

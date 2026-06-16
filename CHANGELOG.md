@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.12.9 — Force the default-language-biased decode language per channel
+
+### Fixed
+
+* **English audio transcribed as Spanish (and other per-channel language
+  drift).**  In the dual-channel / dual-diarize paths each channel was
+  transcribed with `language=None`, so whisperx auto-detected the decode
+  language from only the first ~30 s of that channel.  When that guess was
+  wrong (e.g. "es" on an English meeting), the entire channel's English
+  speech was decoded with the wrong tokenizer → Spanish-looking
+  hallucinations.  The `--default-language` bias previously only relabeled
+  the transcript *metadata* language; it never reached the ASR, so it could
+  not prevent the mistranscription.
+
+  Each channel now **detects → applies the default-language bias → forces
+  that resolved language into the ASR decode** (`model.transcribe(...,
+  language=...)`) via the new `_resolve_channel_language` helper.  A
+  low-confidence minority detection is overridden by the team/operator
+  default (`default_language`, gated by `default_language_override_confidence`,
+  default 0.70) *before* decoding, so single-language teams no longer drift.
+  Alignment uses the same decode language.  The mono path got the same
+  detect→bias→force treatment.  Applies to whisperx (`--language auto`);
+  an explicit `--language <code>` still forces that language as before.
+
 ## v0.12.8 — Correct no-headphones mic crosstalk in the dual-diarize path
 
 ### Fixed
