@@ -637,11 +637,27 @@ def identify_speakers(
         second = float(row[1]) if row.shape[0] > 1 else 0.0
         row_margin[s_idx] = top - second
 
-    # Greedy 1:1 matching: assign best available match above threshold
+    # Matching is two-pass:
+    #
+    #  Pass 1 — greedy 1:1: assign each profile to its single best-scoring
+    #    cluster (highest similarity first).  This guarantees the strongest
+    #    cluster for a person wins that person's name.
+    #
+    #  Pass 2 — many-to-one (added 0.12.11): diarization frequently
+    #    over-segments ONE physical person into several clusters (volume/mic
+    #    changes, cross-channel bleed, backchannel splits).  The 1:1 lock used
+    #    to leave every cluster after the first as a raw placeholder, forcing a
+    #    needs_labeling hop and producing duplicate "Destiny ×3" entries after a
+    #    human named them.  Instead, allow an already-used profile to ALSO claim
+    #    additional clusters — but only when that profile is the cluster's OWN
+    #    top match AND the match is independently confident (clears the
+    #    auto-apply bar), so we don't fold a noisy phantom onto a real person.
+    #    The later apply/relabel step collapses same-name clusters into one
+    #    speaker.
     matches: dict[str, SpeakerMatch] = {}
     used_profiles: set[int] = set()
 
-    # Iterate over (speaker_idx, profile_idx) pairs sorted by similarity desc
+    # ── Pass 1: greedy 1:1 ──
     indices = np.argsort(-sim_matrix, axis=None)  # flat indices, sorted desc
     for flat_idx in indices:
         s_idx, p_idx = np.unravel_index(flat_idx, sim_matrix.shape)
@@ -662,6 +678,31 @@ def identify_speakers(
             margin=row_margin.get(int(s_idx), 1.0),
         )
         used_profiles.add(p_idx)
+
+    # ── Pass 2: many-to-one for confident leftover clusters ──
+    # A still-unmatched cluster may join an already-claimed profile if that
+    # profile is its top match and the score is confident on its own.  We reuse
+    # the auto-apply confidence floor so this never auto-merges an ambiguous
+    # cluster (those stay raw and route to human review, unchanged).
+    for s_idx in range(sim_matrix.shape[0]):
+        speaker_id = speaker_ids[s_idx]
+        if speaker_id in matches:
+            continue
+        p_idx = int(np.argmax(sim_matrix[s_idx]))
+        score = float(sim_matrix[s_idx, p_idx])
+        # Only fold onto an EXISTING (already-claimed) identity, and only when
+        # confident enough to auto-apply outright.  Brand-new identities are
+        # left to pass 1 / human review.
+        if p_idx not in used_profiles:
+            continue
+        if score < MATCH_AUTOAPPLY_CONFIDENCE:
+            continue
+        matches[speaker_id] = SpeakerMatch(
+            name=profile_names[p_idx],
+            confidence=score,
+            evidence_seconds=evidence_seconds.get(speaker_id, 0.0),
+            margin=row_margin.get(int(s_idx), 1.0),
+        )
 
     return matches
 

@@ -64,4 +64,5 @@ jobs:
             tests/test_label.py \
             tests/test_ingest.py \
             tests/test_ssl_cert_injection.py \
-            tests/test_sync_team.py
+            tests/test_sync_team.py \
+            tests/test_voiceprint_gate.py

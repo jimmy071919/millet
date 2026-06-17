@@ -486,3 +486,88 @@ class TestApplyLabelsSummaryLanguage:
         # No language → primary rewritten, no .summary.<lang>.md created.
         assert (session_dir / f"{basename}.summary.md").exists()
         assert not list(session_dir.glob(f"{basename}.summary.??.md"))
+
+
+# ─── relabel_transcript_in_memory: same-name speaker collapse (0.12.11) ──────
+# Diarization over-segments one person into several clusters; once they resolve
+# to the same name (via many-to-one voiceprint match or a human naming each),
+# they must collapse into ONE speaker entry instead of "Destiny, Destiny, …".
+
+class TestRelabelSpeakerDedup:
+    def _txn(self, speakers, segments):
+        from millet.transcribe import Transcript
+        return Transcript(
+            segments=segments,
+            speakers=speakers,
+            language="en",
+            audio_file="x.ogg",
+            duration=10.0,
+        )
+
+    def test_label_map_collapses_duplicate_names(self):
+        # Three raw clusters, two of which a human (or many-to-one) maps to
+        # Destiny; the result must have a single Destiny speaker.
+        txn = self._txn(
+            speakers=[
+                Speaker(id="SPEAKER_00", label="SPEAKER_00"),
+                Speaker(id="SPEAKER_01", label="SPEAKER_01"),
+                Speaker(id="SPEAKER_02", label="SPEAKER_02"),
+            ],
+            segments=[
+                Segment(start=0.0, end=2.0, text="a", speaker="SPEAKER_00"),
+                Segment(start=2.0, end=4.0, text="b", speaker="SPEAKER_01"),
+                Segment(start=4.0, end=6.0, text="c", speaker="SPEAKER_02"),
+            ],
+        )
+        out = relabel_transcript_in_memory(
+            txn,
+            {"SPEAKER_00": "Destiny", "SPEAKER_01": "Andrej", "SPEAKER_02": "Destiny"},
+        )
+        ids = [s.id for s in out.speakers]
+        assert ids == ["Destiny", "Andrej"]  # de-duped, first-seen order
+        # All Destiny segments now share the one id.
+        assert {seg.speaker for seg in out.segments} == {"Destiny", "Andrej"}
+        assert sum(1 for seg in out.segments if seg.speaker == "Destiny") == 2
+
+    def test_empty_map_dedupes_preexisting_duplicates(self):
+        # Backfill case: a transcript already carrying duplicate "Destiny"
+        # entries collapses with an empty label_map.
+        txn = self._txn(
+            speakers=[
+                Speaker(id="Destiny", label="Destiny"),
+                Speaker(id="Destiny", label="Destiny"),
+                Speaker(id="Andrej", label="Andrej"),
+                Speaker(id="Destiny", label="Destiny"),
+            ],
+            segments=[
+                Segment(start=0.0, end=2.0, text="a", speaker="Destiny"),
+                Segment(start=2.0, end=4.0, text="b", speaker="Andrej"),
+            ],
+        )
+        out = relabel_transcript_in_memory(txn, {})
+        assert [s.id for s in out.speakers] == ["Destiny", "Andrej"]
+
+    def test_empty_map_no_dupes_is_noop(self):
+        txn = self._txn(
+            speakers=[
+                Speaker(id="Destiny", label="Destiny"),
+                Speaker(id="Andrej", label="Andrej"),
+            ],
+            segments=[Segment(start=0.0, end=2.0, text="a", speaker="Destiny")],
+        )
+        out = relabel_transcript_in_memory(txn, {})
+        assert out is txn  # unchanged object (fast path)
+
+    def test_no_dupes_with_map_relabels_normally(self):
+        txn = self._txn(
+            speakers=[
+                Speaker(id="YOU", label="YOU"),
+                Speaker(id="REMOTE_1", label="REMOTE_1"),
+            ],
+            segments=[
+                Segment(start=0.0, end=2.0, text="a", speaker="YOU"),
+                Segment(start=2.0, end=4.0, text="b", speaker="REMOTE_1"),
+            ],
+        )
+        out = relabel_transcript_in_memory(txn, {"YOU": "Kasita", "REMOTE_1": "Ahmad"})
+        assert [s.id for s in out.speakers] == ["Kasita", "Ahmad"]

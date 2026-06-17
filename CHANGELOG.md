@@ -1,5 +1,48 @@
 # Changelog
 
+## v0.12.11 — One speaker per person: many-to-one voiceprint matching + speaker de-dup
+
+### Fixed
+
+* **One physical person came back as several speakers, forcing a
+  needs_labeling hop and "Destiny, Destiny, Destiny" in the notes.**
+  Diarization (pyannote) routinely over-segments a single voice into multiple
+  clusters — from volume/mic changes, cross-channel bleed (the scribe's voice
+  on both the mic and system channels in the dual-diarize path), or peeled-off
+  backchannel utterances.  Voiceprint auto-identification used **greedy 1:1
+  matching**: once a profile (say "Destiny") was claimed by its best-scoring
+  cluster, every *other* Destiny cluster was barred from that name and left as
+  a raw `SPEAKER_n`, which (a) routed the session to manual labeling and
+  (b) — once a human named each cluster — produced duplicate same-name speaker
+  entries that nothing collapsed.
+
+  Two changes fix this:
+
+  1. **Many-to-one matching** (`voiceprint.identify_speakers`): after the
+     greedy 1:1 pass assigns each profile to its strongest cluster, a second
+     pass lets an already-claimed profile **also** claim additional clusters —
+     but only when that profile is the cluster's own top match **and** the
+     similarity is confident on its own (clears `MATCH_AUTOAPPLY_CONFIDENCE`).
+     Ambiguous/weak leftover clusters are still left raw for human review, so
+     this never folds a noisy phantom onto a real person.
+
+  2. **Speaker de-duplication** (`label.relabel_transcript_in_memory`, used by
+     `apply_labels` and the GUI): speakers that resolve to the same id collapse
+     into a single entry (segments already point at the merged id).  This also
+     runs for an **empty** label_map, so an older transcript that already
+     carries duplicate names is de-duped in place (enables backfill).
+
+  Net effect: a meeting with one over-segmented known speaker now auto-resolves
+  to a single speaker and completes without manual intervention.
+
+### CI / release
+
+* New `release.yml`: tag-triggered (`v*`) build + publish to PyPI via Trusted
+  Publishing (OIDC), matching vezir and millet-record.  (Requires the
+  `millet-pipeline` PyPI project to register this workflow as a trusted
+  publisher, environment `pypi`.)
+* `test_voiceprint_gate.py` added to the focused CI test set.
+
 ## v0.12.10 — Robust transcript-JSON discovery in `label`
 
 ### Fixed

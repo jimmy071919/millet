@@ -593,8 +593,16 @@ def relabel_transcript_in_memory(
 
     This is used by the GUI to relabel in-memory before the first save,
     avoiding the need to regenerate outputs.
+
+    Also collapses speakers that resolve to the same id into one entry, so an
+    empty ``label_map`` is still meaningful: it de-duplicates a transcript that
+    already carries duplicate-named speakers (e.g. an older session where one
+    person was labeled across several clusters before 0.12.11).
     """
-    if not label_map:
+    # Nothing to relabel AND no duplicate speakers → return as-is.
+    resolved_ids = [label_map.get(sp.id, sp.id) for sp in transcript.speakers]
+    has_dupes = len(resolved_ids) != len(set(resolved_ids))
+    if not label_map and not has_dupes:
         return transcript
 
     new_segments = []
@@ -608,9 +616,20 @@ def relabel_transcript_in_memory(
             words=seg.words,
         ))
 
+    # De-duplicate speakers by resolved id (added 0.12.11).  Diarization can
+    # over-segment one person into several clusters; once they resolve to the
+    # same name (via many-to-one voiceprint matching or a human labeling each
+    # cluster), they must collapse into a SINGLE speaker entry — otherwise the
+    # transcript/summary/PDF show e.g. "Destiny, Destiny, Destiny".  Segments
+    # already point at the merged id above, so this only needs to dedupe the
+    # speakers list while preserving first-seen order.
     new_speakers = []
+    seen_ids: set[str] = set()
     for sp in transcript.speakers:
         new_id = label_map.get(sp.id, sp.id)
+        if new_id in seen_ids:
+            continue
+        seen_ids.add(new_id)
         new_speakers.append(Speaker(id=new_id, label=new_id))
 
     return Transcript(
