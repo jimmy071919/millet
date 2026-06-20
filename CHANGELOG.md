@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.12.14 — Discover MP3 audio in session directories (release fix)
+
+Re-release of 0.12.13: the 0.12.13 tag built the wrong version because the
+static `version` in `pyproject.toml` was not bumped (only `__init__.py` was),
+so the release workflow rebuilt 0.12.12 and PyPI rejected it as a duplicate.
+No code changes versus 0.12.13 — the MP3 discovery feature below is unchanged.
+
 ## v0.12.13 — Discover MP3 audio in session directories
 
 ### Added
