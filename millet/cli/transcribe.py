@@ -248,10 +248,11 @@ def transcribe(
     if audio_path.is_dir():
         wavs = sorted(audio_path.glob("*.wav"))
         oggs = sorted(audio_path.glob("*.ogg"))
-        audio_files = wavs or oggs
+        mp3s = sorted(audio_path.glob("*.mp3"))
+        audio_files = wavs or oggs or mp3s
         if not audio_files:
             click.echo(
-                f"Error: no audio file (.wav/.ogg) found in {audio_path}", err=True
+                f"Error: no audio file (.wav/.ogg/.mp3) found in {audio_path}", err=True
             )
             raise SystemExit(1)
         audio_path = audio_files[0]

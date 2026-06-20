@@ -83,13 +83,16 @@ def _find_session_files(session_dir: Path) -> dict[str, Path]:
             or json_candidates[0]
         )
 
-    # Find audio file (prefer WAV if still present, fall back to OGG)
+    # Find audio file (prefer WAV if still present, fall back to OGG then MP3)
     wavs = sorted(session_dir.glob("*.wav"))
     oggs = sorted(session_dir.glob("*.ogg"))
+    mp3s = sorted(session_dir.glob("*.mp3"))
     if wavs:
         files["wav"] = wavs[0]
     elif oggs:
         files["wav"] = oggs[0]  # key stays "wav" for backward compat
+    elif mp3s:
+        files["wav"] = mp3s[0]  # key stays "wav" for backward compat
 
     # Find summary
     summaries = sorted(session_dir.glob("*.summary.md"))

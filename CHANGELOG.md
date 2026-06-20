@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.12.13 — Discover MP3 audio in session directories
+
+### Added
+
+* **MP3 session-dir discovery.**  `millet transcribe <session_dir>` and
+  `_find_session_files` (used by `label`, `ingest`, `enroll`, `sync`) now
+  discover `*.mp3` audio, in addition to `*.wav` and `*.ogg`.  Preference
+  order is WAV → OGG → MP3; the discovered audio is still surfaced under the
+  `"wav"` key for backward compatibility.  Decoding already worked for any
+  ffmpeg-readable format (`whisperx.load_audio` is ffmpeg-backed); only the
+  directory-discovery globs were restricted.  An explicit `millet transcribe
+  path/to/file.mp3` already worked and is unchanged.
+
 ## v0.12.12 — Rescue the leftover REMOTE bucket; strip mis-clustered backchannel
 
 ### Fixed

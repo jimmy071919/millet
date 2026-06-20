@@ -51,6 +51,20 @@ class TestFindSessionFiles:
         assert "json" not in files
         assert "wav" not in files
 
+    def test_finds_mp3_when_no_wav_or_ogg(self, tmp_path):
+        # MP3-only session dir: the audio is discovered under the "wav" key
+        # (kept for backward compat).
+        (tmp_path / "meeting.mp3").write_bytes(b"ID3" + b"\x00" * 16)
+        files = _find_session_files(tmp_path)
+        assert files["wav"].name == "meeting.mp3"
+
+    def test_prefers_ogg_over_mp3(self, tmp_path):
+        # When both OGG and MP3 are present, OGG wins.
+        (tmp_path / "meeting.ogg").write_bytes(b"OggS" + b"\x00" * 16)
+        (tmp_path / "meeting.mp3").write_bytes(b"ID3" + b"\x00" * 16)
+        files = _find_session_files(tmp_path)
+        assert files["wav"].name == "meeting.ogg"
+
     def test_ignores_frontmatter_json(self, session_dir):
         # The frontmatter sidecar has no "segments" and must NOT be the json.
         (session_dir / "meeting-20260314-100000.frontmatter.json").write_text(
