@@ -1,62 +1,45 @@
-# millet 中文會議錄音轉錄工具
+# millet
 
-這個 repo 是 `millet-pipeline` 的本地化版本，目標是把會議錄音、轉錄、講者分離、中文摘要與 PDF 產出集中在同一個專案資料夾內管理。
+`millet` 是一套本機優先的會議錄音、轉錄、講者分離、中文摘要與 PDF 產出工具。它可以從 Linux 桌面擷取麥克風與系統音訊，使用 WhisperX 轉錄、pyannote 做講者分離，並透過 LM Studio 或其他 OpenAI-compatible API 產生會議摘要。
 
-目前預設行為：
+這個版本預設偏向中文會議工作流：
 
-- 會議語言預設為中文：`MILLET_LANGUAGE=zh`
-- LLM 摘要走 LM Studio 的 OpenAI-compatible API
-- 錄音、轉錄、摘要、PDF 只放在 `millet-output/`
-- Hugging Face / Whisper / transformers / torch 快取只放在 `.millet-models/`
-- `.env` 管理 token、LM Studio URL、模型名稱與路徑
-- `.env`、`.millet-models/`、`millet-output/` 都不會被 git commit
+- 預設語言為中文：`MILLET_LANGUAGE=zh`
+- 摘要預設可接 LM Studio local server
+- 錄音與所有產出集中在專案內的 `millet-output/`
+- 模型與 Hugging Face 快取集中在 `.millet-models/`
+- 使用 `.env` 管理 token、模型路徑與 LLM endpoint
 
-## 目錄
+## 功能
 
-- [整體流程](#整體流程)
-- [第一次設定](#第一次設定)
-- [設定 .env](#設定-env)
-- [啟動 LM Studio](#啟動-lm-studio)
-- [確認 millet 指令使用正確版本](#確認-millet-指令使用正確版本)
-- [下載必要模型](#下載必要模型)
-- [開始錄音與轉錄](#開始錄音與轉錄)
-- [處理既有錄音](#處理既有錄音)
-- [輸出檔案位置](#輸出檔案位置)
-- [常用命令](#常用命令)
-- [講者標記與聲紋](#講者標記與聲紋)
-- [排錯](#排錯)
-- [Git 操作](#git-操作)
+- 錄製麥克風與系統音訊
+- 支援 Zoom、Google Meet、Teams、Discord、Slack、瀏覽器會議等會議來源
+- 使用 WhisperX / faster-whisper 進行語音轉文字
+- 使用 pyannote 進行 speaker diarization，辨識不同講者
+- 預設中文轉錄與中文摘要
+- 支援 LM Studio、Ollama、OpenRouter、Claude Max、Tinfoil 等摘要後端
+- 產出 `.wav`、`.txt`、`.srt`、`.json`、`.summary.md`、`.pdf`
+- 每次會議獨立資料夾管理
+- 支援後續講者命名、聲紋註冊與自動標記
+- 支援將會議成果同步到 Git repo
 
-## 整體流程
+## 系統需求
 
-```text
-啟動 venv
-→ 檢查 .env
-→ 啟動 LM Studio server
-→ 確認音訊工具 pactl / ffmpeg 可用
-→ millet run 開始錄音
-→ Ctrl+C 停止錄音
-→ WhisperX 轉錄
-→ pyannote 講者分離
-→ LM Studio 產生中文摘要
-→ 產出 txt / srt / json / summary.md / pdf
-```
+### Linux 桌面完整流程
 
-## 第一次設定
+錄音、轉錄、摘要、PDF 產出都在 Linux 上完成。
 
-進入專案：
+建議環境：
 
-```bash
-cd /mnt/5be038a8-6538-4ad0-a911-de8b54d7325c/6_code/self/millet
-```
+- Linux with PipeWire 或 PulseAudio
+- Python 3.10+
+- `ffmpeg`
+- `pulseaudio-utils`，提供 `pactl`
+- NVIDIA GPU + CUDA，建議 8GB VRAM 以上
+- Hugging Face token，用於 pyannote gated model
+- LM Studio，本地 LLM 摘要用
 
-啟動虛擬環境：
-
-```bash
-source .venv/bin/activate
-```
-
-安裝系統音訊工具：
+安裝系統套件：
 
 ```bash
 sudo apt-get update
@@ -70,16 +53,54 @@ ffmpeg -version
 pactl info
 ```
 
-## 設定 .env
+### macOS / Windows
 
-複製範本：
+- Linux 才支援完整錄音流程。
+- macOS 可處理既有音檔，但不支援本專案的桌面系統音訊錄製流程。
+- Windows 目前不支援。
+
+## 安裝
+
+### 從 PyPI 安裝
+
+```bash
+pip install millet-pipeline
+```
+
+### 從原始碼安裝
+
+```bash
+git clone <your-repo-url>
+cd millet
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
+
+如果已經有 `.venv`，啟動即可：
+
+```bash
+source .venv/bin/activate
+```
+
+確認 CLI：
+
+```bash
+millet --help
+```
+
+## 設定
+
+本專案使用 `.env` 管理本機設定。`.env` 不會被提交到 git。
+
+建立設定檔：
 
 ```bash
 cp .env.example .env
 nano .env
 ```
 
-`.env` 內容範例：
+範例：
 
 ```bash
 HF_TOKEN=hf_your_token_here
@@ -94,24 +115,24 @@ MILLET_SUMMARY_MODEL=your-lm-studio-model-name
 MILLET_OPENAI_API_KEY=not-needed
 ```
 
-欄位說明：
+### 設定項目
 
-| 變數 | 用途 |
+| 變數 | 說明 |
 |---|---|
-| `HF_TOKEN` | Hugging Face token，用於 pyannote 講者分離模型 |
+| `HF_TOKEN` | Hugging Face token，用於 pyannote 講者分離 |
 | `MILLET_MODEL_CACHE_DIR` | 模型快取資料夾，預設 `.millet-models` |
-| `MILLET_RECORDINGS_DIR` | 所有輸出資料夾，預設 `millet-output` |
-| `MILLET_LANGUAGE` | 預設語言，中文使用 `zh` |
+| `MILLET_RECORDINGS_DIR` | 錄音與輸出資料夾，預設 `millet-output` |
+| `MILLET_LANGUAGE` | 預設語言，中文為 `zh`，自動偵測為 `auto` |
 | `MILLET_SUMMARY_BACKEND` | 摘要後端，LM Studio 使用 `openai` |
-| `MILLET_OPENAI_BASE_URL` | LM Studio server URL，通常是 `http://localhost:1234/v1` |
-| `MILLET_SUMMARY_MODEL` | LM Studio 中載入的模型名稱 |
-| `MILLET_OPENAI_API_KEY` | LM Studio 通常填 `not-needed` |
+| `MILLET_OPENAI_BASE_URL` | OpenAI-compatible API URL |
+| `MILLET_SUMMARY_MODEL` | 摘要模型名稱 |
+| `MILLET_OPENAI_API_KEY` | API key；LM Studio 通常可填 `not-needed` |
 
-`.env` 已被 `.gitignore` 排除，不會被提交。
+## Hugging Face token
 
-### Hugging Face token 權限
+pyannote 的 speaker diarization model 是 gated model，所以需要 Hugging Face token。
 
-Hugging Face token 最小權限只需要：
+最小權限只需要：
 
 ```text
 Read access to contents of all public gated repos you can access
@@ -119,51 +140,61 @@ Read access to contents of all public gated repos you can access
 
 不需要 write 權限。
 
-還要先到模型頁面接受條款：
+建立 token 前，先接受模型條款：
 
 ```text
 https://huggingface.co/pyannote/speaker-diarization-community-1
 ```
 
-## 啟動 LM Studio
+然後把 token 填到 `.env`：
 
-在 LM Studio：
+```bash
+HF_TOKEN=hf_xxxxxxxxxxxxxxxxx
+```
 
-1. 載入你要用的模型
-2. 開啟 Local Server
-3. 確認 API URL 是：
+## LM Studio 設定
+
+1. 開啟 LM Studio
+2. 載入模型
+3. 開啟 Local Server
+4. 確認 API URL，例如：
 
 ```text
 http://localhost:1234/v1
 ```
 
-4. 把模型名稱填進 `.env`：
+5. 在 `.env` 填入：
 
 ```bash
-MILLET_SUMMARY_MODEL=gpt-oss-20b
+MILLET_SUMMARY_BACKEND=openai
+MILLET_OPENAI_BASE_URL=http://localhost:1234/v1
+MILLET_SUMMARY_MODEL=your-lm-studio-model-name
+MILLET_OPENAI_API_KEY=not-needed
 ```
 
-實際名稱以 LM Studio server 頁面顯示為準。
+模型名稱以 LM Studio server 頁面顯示為準。
 
-## 確認 millet 指令使用正確版本
+## 快速開始
 
-每次開新 terminal 後：
+啟動虛擬環境：
 
 ```bash
-cd /mnt/5be038a8-6538-4ad0-a911-de8b54d7325c/6_code/self/millet
 source .venv/bin/activate
-export PATH="$PWD/.venv/bin:$PATH"
-hash -r
+```
+
+確認 `millet` 指令位置：
+
+```bash
 which millet
 ```
 
-`which millet` 必須顯示：
+如果你從原始碼執行，應該指向：
 
 ```text
-/mnt/5be038a8-6538-4ad0-a911-de8b54d7325c/6_code/self/millet/.venv/bin/millet
+/path/to/millet/.venv/bin/millet
 ```
 
-確認設定有被讀到：
+確認設定讀取正常：
 
 ```bash
 python - <<'PY'
@@ -181,72 +212,19 @@ print("hf_token:", bool(cfg.hf_token))
 PY
 ```
 
-預期輸出：
+預期：
 
 ```text
-recordings: .../millet/millet-output
-model_cache: .../millet/.millet-models
+recordings: .../millet-output
+model_cache: .../.millet-models
 language: zh
 hf_token: True
 ```
 
-## 下載必要模型
-
-### Whisper 轉錄模型
-
-第一次執行 `millet run` 或 `millet transcribe` 會自動下載 Whisper 模型。模型會放在：
-
-```text
-.millet-models/huggingface/hub/
-```
-
-### 英文 alignment 模型
-
-如果處理英文會議，可能需要下載英文 alignment model：
-
-```bash
-millet download en
-```
-
-這會下載約 360MB，放到：
-
-```text
-.millet-models/torch/
-```
-
-### 中文會議建議
-
-中文預設是：
-
-```bash
-MILLET_LANGUAGE=zh
-```
-
-中文 alignment 在目前專案沒有預先註冊。如果 alignment 出問題，可以加：
-
-```bash
---skip-alignment
-```
-
-例如：
-
-```bash
-millet run --skip-alignment --compute-type int8 --batch-size 4
-```
-
-## 開始錄音與轉錄
-
-推薦指令：
+開始錄音、轉錄、摘要：
 
 ```bash
 millet run --compute-type int8 --batch-size 4
-```
-
-看到這兩行才是正確狀態：
-
-```text
-Recording to: .../millet/millet-output/meeting-...
-Diarize: True
 ```
 
 停止錄音：
@@ -258,24 +236,85 @@ Ctrl+C
 停止後會自動進行：
 
 ```text
-轉錄 → 講者分離 → 中文摘要 → PDF
+錄音儲存 → WhisperX 轉錄 → pyannote 講者分離 → LLM 中文摘要 → PDF 產出
 ```
 
-如果 GPU VRAM 不夠，改用較小模型：
+## 重要確認
+
+開始錄音時應該看到：
+
+```text
+Recording to: .../millet-output/meeting-...
+Diarize: True
+```
+
+如果輸出沒有進入 `millet-output/`，表示目前可能沒有執行到正確的本地環境。請重新啟動 venv 或使用完整路徑：
 
 ```bash
-millet run --model medium --compute-type int8 --batch-size 4
+./.venv/bin/millet run --compute-type int8 --batch-size 4
 ```
 
-更保守：
+## 模型下載
+
+第一次執行會下載 Whisper 模型，預設放在：
+
+```text
+.millet-models/huggingface/hub/
+```
+
+如果處理英文且需要 word-level alignment，可能需要下載英文 alignment model：
 
 ```bash
-millet run --model base --compute-type int8 --batch-size 4
+millet download en
 ```
 
-## 處理既有錄音
+它會放在：
 
-處理單一音檔：
+```text
+.millet-models/torch/
+```
+
+中文會議通常可以先使用：
+
+```bash
+millet run --skip-alignment --compute-type int8 --batch-size 4
+```
+
+## 輸出檔案
+
+所有會議輸出預設在：
+
+```text
+millet-output/
+```
+
+範例：
+
+```text
+millet-output/meeting-20260624-165403/
+  meeting-20260624-165403.wav
+  meeting-20260624-165403.session.json
+  meeting-20260624-165403.ffmpeg.log
+  meeting-20260624-165403.txt
+  meeting-20260624-165403.srt
+  meeting-20260624-165403.json
+  meeting-20260624-165403.summary.md
+  meeting-20260624-165403.summary.meta.json
+  meeting-20260624-165403.frontmatter.json
+  meeting-20260624-165403.pdf
+```
+
+模型與 token 相關快取預設在：
+
+```text
+.millet-models/
+```
+
+這兩個資料夾都在 `.gitignore` 中。
+
+## 處理既有音檔
+
+轉錄單一音檔：
 
 ```bash
 millet transcribe path/to/audio.wav --compute-type int8 --batch-size 4
@@ -299,64 +338,21 @@ millet transcribe path/to/audio.wav --language zh --skip-alignment --compute-typ
 millet transcribe path/to/audio.wav --no-diarize --compute-type int8 --batch-size 4
 ```
 
-## 輸出檔案位置
-
-所有產出應該只在：
-
-```text
-millet-output/
-```
-
-每次會議會建立一個資料夾：
-
-```text
-millet-output/meeting-20260624-165403/
-```
-
-常見檔案：
-
-```text
-meeting-20260624-165403.wav                 # 錄音檔
-meeting-20260624-165403.session.json        # 錄音 metadata
-meeting-20260624-165403.ffmpeg.log          # ffmpeg log
-meeting-20260624-165403.txt                 # 純文字轉錄
-meeting-20260624-165403.srt                 # 字幕檔
-meeting-20260624-165403.json                # 完整轉錄資料
-meeting-20260624-165403.summary.md          # 中文摘要
-meeting-20260624-165403.summary.meta.json   # 摘要 metadata
-meeting-20260624-165403.frontmatter.json    # 結構化 metadata
-meeting-20260624-165403.pdf                 # PDF 報告
-```
-
-模型快取只應該在：
-
-```text
-.millet-models/
-```
-
-檢查是否有外部殘留：
-
-```bash
-du -sh /home/jimmy/meet-recordings /home/jimmy/.cache/huggingface /home/jimmy/.cache/torch 2>/dev/null || true
-```
-
-正常情況不應該有大型檔案。
-
 ## 常用命令
 
-確認音訊裝置：
+列出音訊裝置：
 
 ```bash
 millet devices
 ```
 
-檢查基本環境：
+檢查基礎環境：
 
 ```bash
 millet check
 ```
 
-注意：`millet check` 來自底層 `millet-record`，可能不完整讀取 `.env`，所以即使它顯示 `HF_TOKEN: NOT SET`，只要下面這個檢查是 `True` 就可以：
+注意：`millet check` 可能只檢查 shell 內的 `HF_TOKEN`，不一定完整讀取 `.env`。若要確認轉錄流程能讀到 token，請用：
 
 ```bash
 python - <<'PY'
@@ -366,33 +362,9 @@ print(bool(cfg.hf_token))
 PY
 ```
 
-開始錄音：
-
-```bash
-millet run --compute-type int8 --batch-size 4
-```
-
-指定自動偵測語言：
-
-```bash
-millet run --language auto --compute-type int8 --batch-size 4
-```
-
-指定英文：
-
-```bash
-millet run --language en --compute-type int8 --batch-size 4
-```
-
-指定中文：
-
-```bash
-millet run --language zh --compute-type int8 --batch-size 4
-```
-
 ## 講者標記與聲紋
 
-轉錄完成後，如果講者名稱不準，可以手動標記：
+手動修正講者：
 
 ```bash
 millet label millet-output/meeting-xxxx
@@ -410,108 +382,87 @@ millet enroll millet-output/meeting-xxxx
 millet label --auto millet-output/meeting-xxxx
 ```
 
-## 排錯
+## 語言設定
 
-### 存到 `/home/jimmy/meet-recordings`
-
-代表你沒有跑到專案內的 `.venv/bin/millet`。
-
-修正：
+預設中文：
 
 ```bash
-cd /mnt/5be038a8-6538-4ad0-a911-de8b54d7325c/6_code/self/millet
-source .venv/bin/activate
-export PATH="$PWD/.venv/bin:$PATH"
-hash -r
-which millet
+MILLET_LANGUAGE=zh
 ```
 
-`which millet` 必須是：
-
-```text
-.../self/millet/.venv/bin/millet
-```
-
-### 又重新下載 1.62GB 模型
-
-代表 Hugging Face cache 沒有指到 `.millet-models`。
-
-確認：
+臨時改自動偵測：
 
 ```bash
-python - <<'PY'
-from millet.paths import load_project_env, apply_model_cache_environment
-load_project_env(); apply_model_cache_environment()
-import os
-for k in ["HF_HOME", "HF_HUB_CACHE", "HF_XET_CACHE", "TRANSFORMERS_CACHE", "TORCH_HOME"]:
-    print(k, os.environ.get(k))
-PY
+millet run --language auto --compute-type int8 --batch-size 4
 ```
 
-都應該指到本專案底下。
+臨時指定英文：
 
-### `CUDA failed with error out of memory`
+```bash
+millet run --language en --compute-type int8 --batch-size 4
+```
 
-降低 batch size 並使用 int8：
+## 常見問題
+
+### CUDA out of memory
+
+使用 int8 與較小 batch size：
 
 ```bash
 millet run --compute-type int8 --batch-size 4
 ```
 
-還是不行就換小模型：
+仍然不足時，改小模型：
 
 ```bash
 millet run --model medium --compute-type int8 --batch-size 4
 millet run --model base --compute-type int8 --batch-size 4
 ```
 
-### `Alignment model for English is not downloaded`
+### 錄音沒有偵測到人聲
 
-下載英文 alignment：
+如果看到：
 
-```bash
-millet download en
+```text
+No active speech found in audio
 ```
 
-或跳過 alignment：
-
-```bash
-millet run --skip-alignment --compute-type int8 --batch-size 4
-```
-
-### `No active speech found in audio`
-
-通常代表測試錄音太短、沒有人聲、麥克風/系統聲音來源不對。先確認裝置：
+可能是錄音太短、麥克風來源錯誤、系統音訊來源錯誤，先檢查：
 
 ```bash
 millet devices
 ```
 
-## Git 操作
+### 產出沒有進入 `millet-output/`
 
-目前 remote：
-
-```text
-origin   https://github.com/jimmy071919/millet.git
-upstream https://github.com/pretyflaco/millet.git
-```
-
-日常修改後：
+請確認目前執行的是專案環境中的 `millet`：
 
 ```bash
-git status
-git add .
-git commit -m "描述這次修改"
-git push
+which millet
 ```
 
-從原作者同步更新：
+從原始碼安裝時，建議啟動 `.venv` 後再執行。也可以直接使用：
 
 ```bash
-git fetch upstream
-git merge upstream/main
+./.venv/bin/millet run --compute-type int8 --batch-size 4
 ```
 
-## 授權
+### 模型又重新下載
 
-原專案使用 GPL-3.0，詳見 [LICENSE](LICENSE)。
+確認模型 cache 是否指到專案內：
+
+```bash
+python - <<'PY'
+from millet.paths import load_project_env, apply_model_cache_environment
+load_project_env(); apply_model_cache_environment()
+import os
+for key in ["HF_HOME", "HF_HUB_CACHE", "HF_XET_CACHE", "TRANSFORMERS_CACHE", "TORCH_HOME"]:
+    print(key, os.environ.get(key))
+PY
+```
+
+應該都指向 `.millet-models/`。
+
+## License
+
+本專案沿用原專案授權，詳見 [LICENSE](LICENSE)。
