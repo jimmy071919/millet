@@ -188,14 +188,14 @@ resolves Hugging Face tokens, model caches, output folders, or summary backends.
 The template also includes LM Studio settings:
 
 ```bash
+MILLET_LANGUAGE=zh
 MILLET_SUMMARY_BACKEND=openai
 MILLET_OPENAI_BASE_URL=http://localhost:1234/v1
 MILLET_SUMMARY_MODEL=your-lm-studio-model-name
 MILLET_OPENAI_API_KEY=not-needed
 ```
 
-By default model caches live under `.millet-models/` and generated recordings /
-transcripts / PDFs live under `millet-output/`.  Both are git-ignored.
+By default `MILLET_LANGUAGE=zh`, so transcription and summaries are Chinese unless you override `--language` or set `MILLET_LANGUAGE=auto`.  Model caches live under `.millet-models/` and generated recordings / transcripts / PDFs live under `millet-output/`.  Both are git-ignored.
 
 ### 4. Ollama (optional, for AI summaries)
 
@@ -635,7 +635,8 @@ millet run --language tr       # Turkish
 millet run --language fr       # French
 millet run --language es       # Spanish
 millet run --language fa       # Farsi (Persian)
-millet run --language auto     # Auto-detect (default)
+millet run --language zh       # Chinese (default via MILLET_LANGUAGE)
+millet run --language auto     # Auto-detect
 ```
 
 ### How it works

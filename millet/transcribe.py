@@ -25,6 +25,7 @@ from typing import Any
 
 from millet.paths import (
     apply_model_cache_environment,
+    default_language,
     huggingface_hub_dir,
     huggingface_token_path,
     load_project_env,
@@ -467,7 +468,7 @@ class TranscriptionConfig:
     parakeet_skip_alignment: bool = True
     compute_type: str = "float16"
     batch_size: int = 16
-    language: str = "auto"
+    language: str = field(default_factory=default_language)
     hf_token: str | None = None
     min_speakers: int | None = None
     max_speakers: int | None = None

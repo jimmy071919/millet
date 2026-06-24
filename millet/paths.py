@@ -190,6 +190,11 @@ def sync_config_path(team: str | None = None) -> Path:
     return config_dir(team) / _SYNC_FILENAME
 
 
+def default_language() -> str:
+    """Default transcription/summary language for CLI commands."""
+    return getenv_renamed("MILLET_LANGUAGE", "MEETSCRIBE_LANGUAGE", default="zh") or "zh"
+
+
 def recordings_dir(team: str | None = None) -> Path:
     """Root recordings directory, optionally scoped to a team.
 

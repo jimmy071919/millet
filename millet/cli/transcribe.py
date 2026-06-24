@@ -5,6 +5,8 @@ from pathlib import Path
 
 import click
 
+from millet.paths import default_language
+
 from ._helpers import (
     _generate_pdf,
     _generate_summary,
@@ -83,8 +85,8 @@ from ._helpers import (
     "--language",
     "-l",
     type=str,
-    default="auto",
-    help="Language code or 'auto' to detect (default: auto). Examples: en, de, fr, es, tr, fa",
+    default=default_language,
+    help="Language code or 'auto' to detect (default: MILLET_LANGUAGE, zh). Examples: zh, en, de, fr, es, tr, fa",
 )
 @click.option(
     "--hf-token",

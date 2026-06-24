@@ -5,6 +5,8 @@ import sys
 
 import click
 
+from millet.paths import default_language
+
 from ._helpers import (
     _drain_countdown,
     _generate_pdf,
@@ -54,7 +56,7 @@ from ._helpers import (
 )
 @click.option("--compute-type", type=str, default="float16")
 @click.option("--batch-size", "-b", type=int, default=16)
-@click.option("--language", "-l", type=str, default="auto")
+@click.option("--language", "-l", type=str, default=default_language)
 @click.option("--hf-token", type=str, default=None, envvar="HF_TOKEN")
 @click.option("--min-speakers", type=int, default=None)
 @click.option("--max-speakers", type=int, default=None)
