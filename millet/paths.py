@@ -278,5 +278,6 @@ def apply_model_cache_environment() -> None:
     os.environ.setdefault("HF_HOME", str(hf_home))
     os.environ.setdefault("HF_HUB_CACHE", str(huggingface_hub_dir()))
     os.environ.setdefault("HUGGINGFACE_HUB_CACHE", os.environ["HF_HUB_CACHE"])
+    os.environ.setdefault("HF_XET_CACHE", str(hf_home / "xet"))
     os.environ.setdefault("TRANSFORMERS_CACHE", str(hf_home / "transformers"))
     os.environ.setdefault("TORCH_HOME", str(torch_home()))
