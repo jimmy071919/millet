@@ -31,8 +31,12 @@ Istanbul's first printing press.  Part of the vezir ecosystem.
 import os as _os
 
 try:
-    from millet.paths import apply_model_cache_environment as _apply_model_cache_environment
+    from millet.paths import (
+        apply_model_cache_environment as _apply_model_cache_environment,
+        load_project_env as _load_project_env,
+    )
 
+    _load_project_env()
     _apply_model_cache_environment()
 except Exception:
     # Cache-path setup is a convenience layer. If path resolution ever fails,

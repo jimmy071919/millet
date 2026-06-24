@@ -91,6 +91,54 @@ _SYNC_FILENAME = "sync_config.json"
 _MODEL_CACHE_DIRNAME = ".millet-models"
 _OUTPUT_DIRNAME = "millet-output"
 
+_DOTENV_LOADED = False
+
+
+def _parse_dotenv_value(raw: str) -> str:
+    """Parse a small, shell-like .env value without expanding variables."""
+    raw = raw.strip()
+    if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in {"'", '"'}:
+        quote = raw[0]
+        raw = raw[1:-1]
+        if quote == '"':
+            return bytes(raw, "utf-8").decode("unicode_escape")
+    return raw
+
+
+def load_project_env(env_path: str | Path | None = None) -> Path | None:
+    """Load KEY=VALUE pairs from the project .env file if present.
+
+    Existing process environment variables win.  This intentionally supports
+    only the common .env subset millet needs: blank lines, # comments, optional
+    ``export KEY=VALUE``, and quoted or unquoted values.
+    """
+    global _DOTENV_LOADED
+    if _DOTENV_LOADED and env_path is None:
+        return None
+
+    path = Path(env_path).expanduser() if env_path else project_root() / ".env"
+    if not path.exists():
+        _DOTENV_LOADED = True
+        return None
+
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):].lstrip()
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if not key or not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", key):
+            continue
+        os.environ.setdefault(key, _parse_dotenv_value(value))
+
+    _DOTENV_LOADED = True
+    return path
+
+
 
 def _validate_team(team: str | None) -> str | None:
     """Return the team slug if valid, or None.  Raise on malformed input."""
@@ -150,13 +198,19 @@ def recordings_dir(team: str | None = None) -> Path:
     """
     team = _validate_team(team)
     root = getenv_renamed("MILLET_RECORDINGS_DIR", "MEET_RECORDINGS_DIR", default="")
-    base = Path(root).expanduser() if root else project_root() / _OUTPUT_DIRNAME
+    base = _project_relative_path(root) if root else project_root() / _OUTPUT_DIRNAME
     return base / team if team else base
 
 
 def project_root() -> Path:
     """Return the source/project root that contains the ``millet`` package."""
     return Path(__file__).resolve().parent.parent
+
+
+def _project_relative_path(value: str | Path) -> Path:
+    """Resolve relative config paths against the project root."""
+    path = Path(value).expanduser()
+    return path if path.is_absolute() else project_root() / path
 
 
 def model_cache_dir() -> Path:
@@ -172,7 +226,7 @@ def model_cache_dir() -> Path:
         "MEETSCRIBE_MODEL_CACHE_DIR",
         default="",
     )
-    return Path(root).expanduser() if root else project_root() / _MODEL_CACHE_DIRNAME
+    return _project_relative_path(root) if root else project_root() / _MODEL_CACHE_DIRNAME
 
 
 def huggingface_home() -> Path:

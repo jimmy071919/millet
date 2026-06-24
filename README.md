@@ -106,10 +106,9 @@ including browser-based meetings and standalone desktop clients.
 # Install from PyPI
 pip install millet-pipeline
 
-# Save your HuggingFace token once (required for speaker diarization)
-mkdir -p .millet-models/huggingface
-printf '%s\n' 'hf_your_token_here' > .millet-models/huggingface/token
-chmod 600 .millet-models/huggingface/token
+# Create local config, then edit .env with your HF token and LM Studio model
+cp .env.example .env
+$EDITOR .env
 
 # Record a meeting, then auto-transcribe + summarize when you stop
 millet run
@@ -177,27 +176,26 @@ the `tinfoil` Python SDK (≈ 2 MB).  Set `TINFOIL_API_KEY` to use the
 1. Create a free account at https://huggingface.co
 2. Accept the model terms at https://huggingface.co/pyannote/speaker-diarization-community-1
 3. Create a read token at https://huggingface.co/settings/tokens
-4. Save it once into this checkout's persistent model cache:
+4. Copy the local config template and fill in `HF_TOKEN`:
 
 ```bash
-mkdir -p .millet-models/huggingface
-printf '%s\n' 'hf_your_token_here' > .millet-models/huggingface/token
-chmod 600 .millet-models/huggingface/token
+cp .env.example .env
+$EDITOR .env
 ```
 
-By default millet reads this token from `.millet-models/huggingface/token` and
-stores Hugging Face / transformers / torch model caches under `.millet-models/`
-in this project checkout.  That directory is git-ignored.
-
-You may also pass `--hf-token` to `millet run` or `millet transcribe`; when a
-token is provided that way, millet saves it to the local token file for future
-runs.
-
-To put the cache somewhere else, set:
+`.env` is git-ignored.  Millet loads it automatically at startup, before it
+resolves Hugging Face tokens, model caches, output folders, or summary backends.
+The template also includes LM Studio settings:
 
 ```bash
-export MILLET_MODEL_CACHE_DIR=/path/to/persistent/millet-models
+MILLET_SUMMARY_BACKEND=openai
+MILLET_OPENAI_BASE_URL=http://localhost:1234/v1
+MILLET_SUMMARY_MODEL=your-lm-studio-model-name
+MILLET_OPENAI_API_KEY=not-needed
 ```
+
+By default model caches live under `.millet-models/` and generated recordings /
+transcripts / PDFs live under `millet-output/`.  Both are git-ignored.
 
 ### 4. Ollama (optional, for AI summaries)
 

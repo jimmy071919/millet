@@ -25,6 +25,7 @@ env/
 # Environment / secrets
 .env
 .env.*
+!.env.example
 .millet-models/
 
 # Recordings (large binary files)

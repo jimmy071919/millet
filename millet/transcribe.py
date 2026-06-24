@@ -27,12 +27,14 @@ from millet.paths import (
     apply_model_cache_environment,
     huggingface_hub_dir,
     huggingface_token_path,
+    load_project_env,
     save_huggingface_token,
     torch_home,
 )
 
 log = logging.getLogger(__name__)
 
+load_project_env()
 apply_model_cache_environment()
 
 # Fix for CUDA NVRTC JIT compilation: pyannote's wespeaker embedding model
