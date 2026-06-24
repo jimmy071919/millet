@@ -1,810 +1,517 @@
-# millet
+# millet 中文會議錄音轉錄工具
 
-[![CI](https://github.com/pretyflaco/millet/actions/workflows/ci.yml/badge.svg)](https://github.com/pretyflaco/millet/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/millet-pipeline.svg)](https://pypi.org/project/millet-pipeline/)
+這個 repo 是 `millet-pipeline` 的本地化版本，目標是把會議錄音、轉錄、講者分離、中文摘要與 PDF 產出集中在同一個專案資料夾內管理。
 
-> **Millet** is a meeting transcription, summarization, and PDF output
-> tool.  It's named after the Ottoman *millet system* — the legal
-> framework of communal autonomy that, in 1493, made it possible for
-> two Sephardic Jewish brothers to establish Istanbul's first printing
-> press, just one year after their expulsion from Spain.  Like the
-> millets it's named after, this tool operates under its own rules,
-> on your own machine, within the broader
-> [vezir](https://github.com/pretyflaco/vezir) ecosystem.
+目前預設行為：
 
-Formerly known as **meetscribe**.  PyPI distribution name:
-`millet-pipeline` (the bare `millet` slot on PyPI is held by an
-unrelated dormant 2021 package).  See
-[CHANGELOG.md](CHANGELOG.md) for the rename details and full release
-history.
+- 會議語言預設為中文：`MILLET_LANGUAGE=zh`
+- LLM 摘要走 LM Studio 的 OpenAI-compatible API
+- 錄音、轉錄、摘要、PDF 只放在 `millet-output/`
+- Hugging Face / Whisper / transformers / torch 快取只放在 `.millet-models/`
+- `.env` 管理 token、LM Studio URL、模型名稱與路徑
+- `.env`、`.millet-models/`、`millet-output/` 都不會被 git commit
 
-Meeting transcription with speaker diarization, AI-generated summaries,
-and professional PDF output.
+## 目錄
 
-Records dual-channel audio (your mic + system audio) from **any** meeting
-app and produces diarized transcripts using WhisperX + pyannote-audio.
-Works fully offline with local models, or optionally use cloud APIs
-(OpenRouter, Claude Max) for higher-quality summaries.  A
-**summarization preset selector** picks one of three backends per run:
-`high-quality` (Sonnet 4.6), `confidential` (DeepSeek V4 Pro inside a
-hardware-attested Tinfoil TEE — the prompts never leave the secure
-enclave, and the resulting PDF carries a red CONFIDENTIAL watermark on
-every page), or `alternative` (Kimi K2.6 via OpenRouter).
+- [整體流程](#整體流程)
+- [第一次設定](#第一次設定)
+- [設定 .env](#設定-env)
+- [啟動 LM Studio](#啟動-lm-studio)
+- [確認 millet 指令使用正確版本](#確認-millet-指令使用正確版本)
+- [下載必要模型](#下載必要模型)
+- [開始錄音與轉錄](#開始錄音與轉錄)
+- [處理既有錄音](#處理既有錄音)
+- [輸出檔案位置](#輸出檔案位置)
+- [常用命令](#常用命令)
+- [講者標記與聲紋](#講者標記與聲紋)
+- [排錯](#排錯)
+- [Git 操作](#git-操作)
 
-## Works with any meeting app
+## 整體流程
 
-Because millet captures system audio at the OS level, it works with
-every voice/video call application:
-
-- **Zoom**
-- **Google Meet**
-- **Microsoft Teams**
-- **Slack** (huddles and calls)
-- **Discord**
-- **Signal** (voice and video calls)
-- **Telegram** (voice and video calls)
-- **WhatsApp** (desktop voice and video calls)
-- **Keet** (P2P calls)
-- **Jitsi Meet**
-- **Webex**
-- **Skype**
-- **FaceTime** (via browser)
-- **GoTo Meeting**
-- **RingCentral**
-- **Amazon Chime**
-- **BlueJeans**
-
-Any app that plays audio through your system speakers will work --
-including browser-based meetings and standalone desktop clients.
-
-## Features
-
-- **Dual-channel audio capture** -- records your mic (left channel) and remote
-  participants (right channel) simultaneously via PipeWire/PulseAudio + ffmpeg
-- **WhisperX transcription** -- fast batched inference with
-  `openai/whisper-large-v3-turbo`, word-level timestamps via wav2vec2 alignment
-- **Multilingual** -- auto-detects language or manually set it; supports
-  English, German, Turkish, French, Spanish, Farsi, and 90+ other languages
-- **Speaker diarization** -- pyannote-audio identifies who said what, with
-  automatic YOU/REMOTE labeling from the dual-channel signal
-- **AI meeting summaries** -- local LLMs via Ollama, or cloud APIs via
-  OpenRouter / Claude Max / Tinfoil TEE, with automatic fallback between
-  backends (preset-aware: when a preset is explicitly selected the
-  fallback is disabled so the chosen privacy/quality level is honored)
-- **Summarization presets** -- `--summary-preset high-quality |
-  confidential | alternative` resolves to a `(backend, model)` pair;
-  the `confidential` preset routes to a Tinfoil TEE-attested DeepSeek
-  V4 Pro so prompts cannot be seen by the model provider or cloud
-  operator
-- **CONFIDENTIAL PDF watermark** -- sessions summarized via the
-  `tinfoil` backend get a red CONFIDENTIAL header + footer on every
-  page (auto-detected from `summary.backend`, survives relabeling)
-- **Voiceprint speaker recognition** -- automatically identifies speakers
-  across meetings using voice embedding profiles
-- **Meeting sync** -- push transcripts and summaries to any Git repository
-  on a configurable schedule
-- **Professional PDF output** -- summary + full transcript in a clean,
-  page-numbered PDF with full Unicode support (DejaVu Sans) and RTL for Farsi
-- **Multiple output formats** -- `.txt`, `.srt`, `.json`, `.summary.md`, `.pdf`
-- **Structured YAML frontmatter** -- every `.summary.md` carries a typed
-  schema (action items, decisions, participants, topics, language,
-  duration) plus a matching `.frontmatter.json` sidecar, ready for
-  indexers and downstream tooling like
-  [vezir](https://github.com/pretyflaco/vezir)
-- **GTK3 GUI widget** -- small always-on-top window with record/stop, timer,
-  and one-click access to results
-- **CLI** -- `millet record`, `millet transcribe`, `millet run`, `millet gui`,
-  `millet label`, `millet enroll`, `millet sync`, `millet ingest`,
-  `millet devices`, `millet check`
-- **Per-session folders** -- each recording gets its own organized directory
-- **Offline-first** -- after initial model download, core features work without
-  internet; cloud backends are optional upgrades
-
-## Quick start
-
-```bash
-# Install from PyPI
-pip install millet-pipeline
-
-# Create local config, then edit .env with your HF token and LM Studio model
-cp .env.example .env
-$EDITOR .env
-
-# Record a meeting, then auto-transcribe + summarize when you stop
-millet run
-# Press Ctrl+C when the meeting ends
+```text
+啟動 venv
+→ 檢查 .env
+→ 啟動 LM Studio server
+→ 確認音訊工具 pactl / ffmpeg 可用
+→ millet run 開始錄音
+→ Ctrl+C 停止錄音
+→ WhisperX 轉錄
+→ pyannote 講者分離
+→ LM Studio 產生中文摘要
+→ 產出 txt / srt / json / summary.md / pdf
 ```
 
-## Requirements
+## 第一次設定
 
-millet runs in two configurations:
-
-**Linux desktop** (full pipeline: record + transcribe + label + sync)
-
-- Linux with PipeWire or PulseAudio (for system-audio capture)
-- NVIDIA GPU with CUDA (8 GB+ VRAM recommended; CPU mode available but slower)
-- Python 3.10+, ffmpeg
-- HuggingFace token (free) for the diarization model
-- Ollama (optional) for local AI summaries
-
-**macOS Apple Silicon** (post-capture pipeline: transcribe + label + sync)
-
-- M1 / M2 / M3 Mac running macOS
-- Python 3.10+, ffmpeg
-- `pip install 'millet-pipeline[mlx]'` to auto-select MLX Whisper for ASR
-- HuggingFace token, Ollama as above
-- Note: `millet record` / `millet run` (audio capture) require Linux. On a Mac,
-  feed in audio captured elsewhere via `millet transcribe <file.wav>`, or use
-  [vezir](https://github.com/pretyflaco/vezir) to run a Mac as a server with
-  Linux/Android thin clients providing the recordings.
-
-See [REQUIREMENTS.md](REQUIREMENTS.md) for full hardware/software details.
-
-## Installation
-
-### 1. System dependencies
+進入專案：
 
 ```bash
-# Ubuntu / Pop!_OS / Debian
-sudo apt install ffmpeg pulseaudio-utils
-
-# Fedora
-sudo dnf install ffmpeg pulseaudio-utils
+cd /mnt/5be038a8-6538-4ad0-a911-de8b54d7325c/6_code/self/millet
 ```
 
-### 2. Install millet
+啟動虛擬環境：
 
 ```bash
-# From PyPI (recommended)
-pip install millet-pipeline
-
-# Optional: pull the Tinfoil TEE SDK to enable the Confidential preset
-pip install 'millet-pipeline[tee]'
-
-# From source
-git clone https://github.com/pretyflaco/millet
-cd millet
-pip install -e .
+source .venv/bin/activate
 ```
 
-This creates the `meet` command in your PATH.  The `[tee]` extra adds
-the `tinfoil` Python SDK (≈ 2 MB).  Set `TINFOIL_API_KEY` to use the
-`--summary-preset confidential` route; see *Summarization presets* below.
+安裝系統音訊工具：
 
-### 3. HuggingFace token (for speaker diarization)
+```bash
+sudo apt-get update
+sudo apt-get install -y ffmpeg pulseaudio-utils
+```
 
-1. Create a free account at https://huggingface.co
-2. Accept the model terms at https://huggingface.co/pyannote/speaker-diarization-community-1
-3. Create a read token at https://huggingface.co/settings/tokens
-4. Copy the local config template and fill in `HF_TOKEN`:
+確認音訊工具可用：
+
+```bash
+ffmpeg -version
+pactl info
+```
+
+## 設定 .env
+
+複製範本：
 
 ```bash
 cp .env.example .env
-$EDITOR .env
+nano .env
 ```
 
-`.env` is git-ignored.  Millet loads it automatically at startup, before it
-resolves Hugging Face tokens, model caches, output folders, or summary backends.
-The template also includes LM Studio settings:
+`.env` 內容範例：
 
 ```bash
+HF_TOKEN=hf_your_token_here
+
+MILLET_MODEL_CACHE_DIR=.millet-models
+MILLET_RECORDINGS_DIR=millet-output
 MILLET_LANGUAGE=zh
+
 MILLET_SUMMARY_BACKEND=openai
 MILLET_OPENAI_BASE_URL=http://localhost:1234/v1
 MILLET_SUMMARY_MODEL=your-lm-studio-model-name
 MILLET_OPENAI_API_KEY=not-needed
 ```
 
-By default `MILLET_LANGUAGE=zh`, so transcription and summaries are Chinese unless you override `--language` or set `MILLET_LANGUAGE=auto`.  Model caches live under `.millet-models/` and generated recordings / transcripts / PDFs live under `millet-output/`.  Both are git-ignored.
+欄位說明：
 
-### 4. Ollama (optional, for AI summaries)
+| 變數 | 用途 |
+|---|---|
+| `HF_TOKEN` | Hugging Face token，用於 pyannote 講者分離模型 |
+| `MILLET_MODEL_CACHE_DIR` | 模型快取資料夾，預設 `.millet-models` |
+| `MILLET_RECORDINGS_DIR` | 所有輸出資料夾，預設 `millet-output` |
+| `MILLET_LANGUAGE` | 預設語言，中文使用 `zh` |
+| `MILLET_SUMMARY_BACKEND` | 摘要後端，LM Studio 使用 `openai` |
+| `MILLET_OPENAI_BASE_URL` | LM Studio server URL，通常是 `http://localhost:1234/v1` |
+| `MILLET_SUMMARY_MODEL` | LM Studio 中載入的模型名稱 |
+| `MILLET_OPENAI_API_KEY` | LM Studio 通常填 `not-needed` |
 
-Install from https://ollama.com, then pull the default summary model:
+`.env` 已被 `.gitignore` 排除，不會被提交。
 
-```bash
-ollama pull qwen3.5:9b
+### Hugging Face token 權限
+
+Hugging Face token 最小權限只需要：
+
+```text
+Read access to contents of all public gated repos you can access
 ```
 
-### 5. Verify setup
+不需要 write 權限。
 
-```bash
-millet check
+還要先到模型頁面接受條款：
+
+```text
+https://huggingface.co/pyannote/speaker-diarization-community-1
 ```
 
-## Usage
+## 啟動 LM Studio
 
-### Check audio devices
+在 LM Studio：
+
+1. 載入你要用的模型
+2. 開啟 Local Server
+3. 確認 API URL 是：
+
+```text
+http://localhost:1234/v1
+```
+
+4. 把模型名稱填進 `.env`：
+
+```bash
+MILLET_SUMMARY_MODEL=gpt-oss-20b
+```
+
+實際名稱以 LM Studio server 頁面顯示為準。
+
+## 確認 millet 指令使用正確版本
+
+每次開新 terminal 後：
+
+```bash
+cd /mnt/5be038a8-6538-4ad0-a911-de8b54d7325c/6_code/self/millet
+source .venv/bin/activate
+export PATH="$PWD/.venv/bin:$PATH"
+hash -r
+which millet
+```
+
+`which millet` 必須顯示：
+
+```text
+/mnt/5be038a8-6538-4ad0-a911-de8b54d7325c/6_code/self/millet/.venv/bin/millet
+```
+
+確認設定有被讀到：
+
+```bash
+python - <<'PY'
+from millet.paths import recordings_dir, model_cache_dir, load_project_env, apply_model_cache_environment
+from millet.transcribe import TranscriptionConfig
+
+load_project_env()
+apply_model_cache_environment()
+cfg = TranscriptionConfig(device="cpu", torch_device="cpu")
+
+print("recordings:", recordings_dir())
+print("model_cache:", model_cache_dir())
+print("language:", cfg.language)
+print("hf_token:", bool(cfg.hf_token))
+PY
+```
+
+預期輸出：
+
+```text
+recordings: .../millet/millet-output
+model_cache: .../millet/.millet-models
+language: zh
+hf_token: True
+```
+
+## 下載必要模型
+
+### Whisper 轉錄模型
+
+第一次執行 `millet run` 或 `millet transcribe` 會自動下載 Whisper 模型。模型會放在：
+
+```text
+.millet-models/huggingface/hub/
+```
+
+### 英文 alignment 模型
+
+如果處理英文會議，可能需要下載英文 alignment model：
+
+```bash
+millet download en
+```
+
+這會下載約 360MB，放到：
+
+```text
+.millet-models/torch/
+```
+
+### 中文會議建議
+
+中文預設是：
+
+```bash
+MILLET_LANGUAGE=zh
+```
+
+中文 alignment 在目前專案沒有預先註冊。如果 alignment 出問題，可以加：
+
+```bash
+--skip-alignment
+```
+
+例如：
+
+```bash
+millet run --skip-alignment --compute-type int8 --batch-size 4
+```
+
+## 開始錄音與轉錄
+
+推薦指令：
+
+```bash
+millet run --compute-type int8 --batch-size 4
+```
+
+看到這兩行才是正確狀態：
+
+```text
+Recording to: .../millet/millet-output/meeting-...
+Diarize: True
+```
+
+停止錄音：
+
+```text
+Ctrl+C
+```
+
+停止後會自動進行：
+
+```text
+轉錄 → 講者分離 → 中文摘要 → PDF
+```
+
+如果 GPU VRAM 不夠，改用較小模型：
+
+```bash
+millet run --model medium --compute-type int8 --batch-size 4
+```
+
+更保守：
+
+```bash
+millet run --model base --compute-type int8 --batch-size 4
+```
+
+## 處理既有錄音
+
+處理單一音檔：
+
+```bash
+millet transcribe path/to/audio.wav --compute-type int8 --batch-size 4
+```
+
+指定中文：
+
+```bash
+millet transcribe path/to/audio.wav --language zh --compute-type int8 --batch-size 4
+```
+
+跳過 alignment：
+
+```bash
+millet transcribe path/to/audio.wav --language zh --skip-alignment --compute-type int8 --batch-size 4
+```
+
+不做講者分離：
+
+```bash
+millet transcribe path/to/audio.wav --no-diarize --compute-type int8 --batch-size 4
+```
+
+## 輸出檔案位置
+
+所有產出應該只在：
+
+```text
+millet-output/
+```
+
+每次會議會建立一個資料夾：
+
+```text
+millet-output/meeting-20260624-165403/
+```
+
+常見檔案：
+
+```text
+meeting-20260624-165403.wav                 # 錄音檔
+meeting-20260624-165403.session.json        # 錄音 metadata
+meeting-20260624-165403.ffmpeg.log          # ffmpeg log
+meeting-20260624-165403.txt                 # 純文字轉錄
+meeting-20260624-165403.srt                 # 字幕檔
+meeting-20260624-165403.json                # 完整轉錄資料
+meeting-20260624-165403.summary.md          # 中文摘要
+meeting-20260624-165403.summary.meta.json   # 摘要 metadata
+meeting-20260624-165403.frontmatter.json    # 結構化 metadata
+meeting-20260624-165403.pdf                 # PDF 報告
+```
+
+模型快取只應該在：
+
+```text
+.millet-models/
+```
+
+檢查是否有外部殘留：
+
+```bash
+du -sh /home/jimmy/meet-recordings /home/jimmy/.cache/huggingface /home/jimmy/.cache/torch 2>/dev/null || true
+```
+
+正常情況不應該有大型檔案。
+
+## 常用命令
+
+確認音訊裝置：
 
 ```bash
 millet devices
 ```
 
-### Record a meeting
-
-Start recording before or during your meeting:
+檢查基本環境：
 
 ```bash
-millet record
+millet check
 ```
 
-Press Ctrl+C when the meeting ends. A 10-second drain buffer ensures all audio
-is captured. Recordings are saved to `./millet-output/`.
-
-Options:
-- `-o /path` -- save recordings elsewhere
-- `--virtual-sink` -- create isolated virtual sink (avoids capturing notification sounds)
-- `--mic <source>` -- specify mic source (use `millet devices` to find names)
-- `--monitor <source>` -- specify monitor source
-
-### Transcribe a recording
+注意：`millet check` 來自底層 `millet-record`，可能不完整讀取 `.env`，所以即使它顯示 `HF_TOKEN: NOT SET`，只要下面這個檢查是 `True` 就可以：
 
 ```bash
-millet transcribe ./millet-output/meeting-20260312-140000/meeting-20260312-140000.wav
+python - <<'PY'
+from millet.transcribe import TranscriptionConfig
+cfg = TranscriptionConfig(device="cpu", torch_device="cpu")
+print(bool(cfg.hf_token))
+PY
 ```
 
-Options:
-- `-m large-v3-turbo` -- Whisper model (default: `large-v3-turbo`; also: `base`, `medium`, `large-v2`)
-- `-l auto` -- language code or `auto` to auto-detect (default: `auto`; e.g. `en`, `de`, `tr`, `fa`)
-- `--asr-backend auto` -- ASR backend: `auto`, `whisperx`, or `mlx`. On Apple
-  Silicon with `mlx-whisper` installed, `auto` uses MLX Whisper for ASR.
-  MLX only replaces the transcription step; millet still requires
-  WhisperX for audio loading, alignment, and diarization.
-- `--mlx-model <repo-or-path>` -- MLX Whisper model path/repo (default: maps
-  `large-v3-turbo` to `mlx-community/whisper-large-v3-turbo`)
-- `--device cuda` -- `cuda` or `cpu`. Default: auto-detected — `cpu` on
-  Apple Silicon (since macOS has no CUDA), `cuda` elsewhere.
-- `--torch-device mps` -- optional PyTorch device for alignment/diarization;
-  useful with MLX ASR or CPU ASR on Apple Silicon.
-- `--compute-type float16` -- `float16` or `int8` for lower VRAM (default: `float16`)
-- `-b 16` -- batch size, reduce if running low on VRAM (default: `16`)
-- `--min-speakers 2` / `--max-speakers 6` -- hint for number of speakers
-- `--no-diarize` -- skip speaker diarization
-- `--no-summarize` -- skip AI summary generation
-- `--summary-backend openrouter` -- summary backend (`ollama`, `openrouter`, `claudemax`, `openai`)
-- `--summary-model <model>` -- model for summary (default: per-backend)
-- `--skip-alignment` -- skip word-level alignment (useful if alignment model is unavailable)
-- `--mixdown mono|dual` -- stereo mixdown mode (default: `mono`). Use `dual` for
-  headphone setups where mic and system audio don't bleed into each other (see below)
-
-#### Dual-channel mode for headphone users
-
-If you use headphones, your mic captures only your voice while the system
-channel captures only the remote participants. In this setup the default mono
-mixdown creates a ~20× energy imbalance that causes WhisperX to suppress the
-quieter voice.
-
-Use `--mixdown dual` to transcribe each channel independently:
+開始錄音：
 
 ```bash
-millet transcribe --mixdown dual ./millet-output/meeting-20260312-140000/
+millet run --compute-type int8 --batch-size 4
 ```
 
-This skips diarization entirely (channel identity = speaker identity) and
-labels segments as YOU (mic) or REMOTE (system). Default `--mixdown mono`
-behavior is unchanged -- use it when your speakers play into the room and
-both voices appear on both channels.
-
-### Record + transcribe in one shot
+指定自動偵測語言：
 
 ```bash
-millet run
+millet run --language auto --compute-type int8 --batch-size 4
 ```
 
-Records until Ctrl+C, then automatically transcribes, generates a summary,
-and produces a PDF. Takes all options from both `record` and `transcribe`
-(including `--mixdown dual`).
-
-### Launch the GUI widget
+指定英文：
 
 ```bash
-millet gui
+millet run --language en --compute-type int8 --batch-size 4
 ```
 
-A small always-on-top window with:
-- Record / Stop button
-- Live timer and file size
-- Status indicator (Recording, Flushing, Transcribing, Summarizing, Done)
-- "Open PDF" and "Open Folder" buttons after completion
-
-When 2 or more speakers are detected, a **speaker labeling dialog** appears
-before the results are saved. Each speaker is shown with their channel and a
-sample line of text. If voice profiles exist, confident matches are shown
-automatically. Enter a real name or leave blank to keep the auto-assigned
-label (YOU, REMOTE_1, etc.).
-
-If meeting sync is configured and the recording matches a scheduled meeting,
-a **sync confirmation prompt** appears with Push / Skip buttons.
-
-![millet GUI](screenshot.png)
-
-### Label speakers after the fact
+指定中文：
 
 ```bash
-millet label ./millet-output/meeting-20260313-214133
+millet run --language zh --compute-type int8 --batch-size 4
 ```
 
-For each speaker in the recording, `millet label`:
-1. Shows a table of all speakers (label, channel, segment count, sample text)
-2. Plays a short audio clip from that speaker's channel (requires `ffplay`)
-3. Prompts you to enter a real name (press Enter to keep the existing label)
-4. Regenerates all outputs (`.txt`, `.srt`, `.json`, `.summary.md`, `.pdf`) with the new names
+## 講者標記與聲紋
 
-With `--auto`, voice profiles are used to automatically identify known speakers.
-Confident matches are applied without prompting; only unrecognized speakers get
-the interactive prompt:
+轉錄完成後，如果講者名稱不準，可以手動標記：
 
 ```bash
-millet label --auto ./millet-output/meeting-20260313-214133
+millet label millet-output/meeting-xxxx
 ```
 
-Options:
-- `--auto` -- auto-label using voice profiles (see [Voiceprint speaker recognition](#voiceprint-speaker-recognition))
-- `--no-audio` -- skip audio playback, just show text samples
-- `--no-summary` -- use find-and-replace instead of re-running Ollama
-- `--summary-backend` / `--summary-model` -- override summary backend and model for regeneration
-
-## Output
-
-Each recording gets its own session directory:
-
-```
-./millet-output/meeting-20260312-140000/
-    meeting-20260312-140000.wav                 # Stereo audio (16kHz)
-    meeting-20260312-140000.session.json        # Recording metadata
-    meeting-20260312-140000.ffmpeg.log          # ffmpeg capture log
-    meeting-20260312-140000.txt                 # Plain text transcript
-    meeting-20260312-140000.srt                 # Subtitle format
-    meeting-20260312-140000.json                # Full detail (word-level timestamps)
-    meeting-20260312-140000.summary.md          # AI meeting summary with YAML frontmatter
-    meeting-20260312-140000.summary.meta.json   # Summary backend/model + timing metadata
-    meeting-20260312-140000.frontmatter.json    # Structured frontmatter (schema_version 1)
-    meeting-20260312-140000.pdf                 # Professional PDF (summary + transcript)
-```
-
-Example `.txt` output:
-
-```
-[00:00:12 --> 00:00:18] YOU: So the main issue we're seeing is with the API rate limiting.
-[00:00:19 --> 00:00:25] REMOTE_1: Right, I think we should implement exponential backoff.
-[00:00:26 --> 00:00:31] YOU: Agreed. Can you also look at caching the responses?
-```
-
-### Structured frontmatter
-
-Every `.summary.md` ships with a typed YAML frontmatter block plus a
-matching `.frontmatter.json` sidecar.  The schema is intentionally
-small in v1 so downstream consumers can rely on it:
-
-```yaml
----
-schema_version: 1
-type: meeting
-title: Q2 Pricing Discussion
-date: "2026-03-17T14:00:00+00:00"
-duration: PT42M17S
-language: en
-participants:
-  - name: YOU
-    role: null
-    channel: mic
-  - name: Alice
-    role: null
-    channel: system
-topics:
-  - pricing
-  - onboarding
-action_items:
-  - assignee: Alice
-    task: Send pricing doc
-    due: Friday
-    status: open
-decisions:
-  - text: Run pricing experiment at $99/mo
-    topic: pricing
-source:
-  session_id: meeting-20260312-140000
-  audio_sha256: null
----
-## Meeting Overview
-...
-
-## Key Topics Discussed
-...
-```
-
-`schema_version: 1` is what every consumer should pin against.
-The JSON sidecar contains the exact same dict for tools that don't
-want to parse YAML.  `[vezir](https://github.com/pretyflaco/vezir)
-0.2.0+` reads these files directly to build a queryable index over
-your meetings.
-
-### Backfilling existing sessions
-
-Sessions recorded before millet 0.7.0 don't carry frontmatter.
-Re-extract it for one or more sessions with:
+建立聲紋：
 
 ```bash
-# Re-run the LLM to produce frontmatter; idempotent (skips sessions
-# whose .summary.meta.json already records data_extracted=true).
-millet ingest ./millet-output/meeting-2026*
-
-# Force re-extraction even when frontmatter is already present:
-millet ingest --force ./millet-output/meeting-20260312-140000
-
-# Preview without invoking the LLM:
-millet ingest --dry-run ./millet-output/meeting-2026*
+millet enroll millet-output/meeting-xxxx
 ```
 
-`millet ingest` accepts the same `--summary-backend` /
-`--summary-model` / `--ollama-singlepass` flags as
-`millet transcribe` and regenerates the PDF by default
-(`--no-pdf` to skip).
-
-## AI summary
-
-millet generates a structured meeting summary with:
-- Overview
-- Key topics discussed
-- Action items (with owners when mentioned)
-- Decisions made
-- Open questions / follow-ups
-
-### Supported models
-
-| Model | Size | Speed | Notes |
-|-------|------|-------|-------|
-| `qwen3.5:9b` | 6.6 GB | ~18-35s | **Default** -- best balance of quality and speed |
-| `gemma3:12b` | 8.1 GB | ~15s | Fastest |
-| `qwen3:14b` | 9.3 GB | ~39s | Good quality |
-| `glm-4.7-flash` | 19 GB | ~37s | Must use thinking-off mode (handled automatically) |
-
-Change the model:
+之後自動標記：
 
 ```bash
-millet run --summary-model gemma3:12b
+millet label --auto millet-output/meeting-xxxx
 ```
 
-Disable summaries:
+## 排錯
+
+### 存到 `/home/jimmy/meet-recordings`
+
+代表你沒有跑到專案內的 `.venv/bin/millet`。
+
+修正：
 
 ```bash
-millet run --no-summarize
+cd /mnt/5be038a8-6538-4ad0-a911-de8b54d7325c/6_code/self/millet
+source .venv/bin/activate
+export PATH="$PWD/.venv/bin:$PATH"
+hash -r
+which millet
 ```
 
-### Summary backends
+`which millet` 必須是：
 
-millet supports five backends with automatic fallback:
+```text
+.../self/millet/.venv/bin/millet
+```
 
-| Backend | Setup | Cost | Quality | Privacy |
-|---------|-------|------|---------|---------|
-| `ollama` (default) | `ollama serve` + `ollama pull qwen3.5:9b` | Free | Good | Fully local |
-| `openrouter` | Set `OPENROUTER_API_KEY` | Pay-per-use | Excellent | Cloud (model-provider-visible) |
-| `claudemax` | Run claude-max-api-proxy on localhost:3457 | Claude Max subscription | Excellent | Cloud (Anthropic-visible) |
-| `tinfoil` | `pip install 'millet-pipeline[tee]'`, set `TINFOIL_API_KEY` (or drop a key file at `~/models/tinfoil/tinfoil.txt`) | ~$0.009/meeting | Excellent (DeepSeek V4 Pro) | **Hardware-attested TEE — prompts not visible to provider/operator** |
-| `openai` | Set `MEETSCRIBE_OPENAI_BASE_URL` | Varies | Varies | Depends on endpoint |
+### 又重新下載 1.62GB 模型
 
-The `openai` backend works with any OpenAI-compatible API — Lemonade, LiteLLM,
-vLLM, text-generation-webui, LocalAI, or any self-hosted endpoint.
+代表 Hugging Face cache 沒有指到 `.millet-models`。
 
-The `tinfoil` backend runs inference inside a hardware-attested TEE (AMD
-SEV-SNP or Intel TDX, depending on the model).  The model provider can't
-see the prompts, the cloud operator can't see the prompts, and the
-integrity is checked against an attestation report on every request.
-~$0.009 per meeting; latency ~66 s for a 30-min recording on DeepSeek
-V4 Pro.
+確認：
 
 ```bash
-# Use OpenRouter
-millet run --summary-backend openrouter --summary-model anthropic/claude-sonnet-4.6
-
-# Use any OpenAI-compatible endpoint
-export MEETSCRIBE_SUMMARY_BACKEND=openai
-export MEETSCRIBE_OPENAI_BASE_URL=http://localhost:8000/v1
-export MEETSCRIBE_SUMMARY_MODEL=your-model-name
-# Optional: export MEETSCRIBE_OPENAI_API_KEY=your-key
-
-# Or set via environment variables
-export MEETSCRIBE_SUMMARY_BACKEND=openrouter
-export MEETSCRIBE_SUMMARY_MODEL=anthropic/claude-sonnet-4.6
+python - <<'PY'
+from millet.paths import load_project_env, apply_model_cache_environment
+load_project_env(); apply_model_cache_environment()
+import os
+for k in ["HF_HOME", "HF_HUB_CACHE", "HF_XET_CACHE", "TRANSFORMERS_CACHE", "TORCH_HOME"]:
+    print(k, os.environ.get(k))
+PY
 ```
 
-If the configured backend is unavailable, millet automatically tries the
-next one in the fallback chain: **claudemax → tinfoil → openrouter → ollama**.
-The `openai` backend is opt-in only and never participates in the fallback
-chain.
+都應該指到本專案底下。
 
-When a preset is explicitly selected (see *Summarization presets* below),
-this fallback is **disabled** for that run — the chosen preset's backend
-either succeeds or the whole summarization step fails loudly with a
-non-zero exit.  This protects the privacy/quality promise of the
-`confidential` preset (a silent tinfoil → claudemax fallback would defeat
-the entire point of choosing TEE-attested inference).
+### `CUDA failed with error out of memory`
 
-### Summarization presets
-
-A preset is a friendly name that resolves to a concrete `(backend, model)`
-pair.  Set it via `--summary-preset` on `transcribe`, `run`, `label`,
-`gui`, or `ingest`, or via the `MEETSCRIBE_SUMMARY_PRESET` env var.
-
-| Preset | Backend | Model | Use case |
-|---|---|---|---|
-| `high-quality` | `claudemax` | `claude-sonnet-4-6` | Default for users with a Claude Max subscription; highest summary quality |
-| `confidential` | `tinfoil` | `deepseek-v4-pro` | Meetings where prompts must not be retained or trained on; hardware-attested TEE |
-| `alternative` | `openrouter` | `moonshotai/kimi-k2.6` | Cheapest cloud option (~$0.017/meeting); useful when claudemax credentials are unavailable |
+降低 batch size 並使用 int8：
 
 ```bash
-# Quick check of which preset is in effect
-millet transcribe ./millet-output/today/today.wav --summary-preset confidential
-
-# Or set per-session via env
-export MEETSCRIBE_SUMMARY_PRESET=high-quality
-millet run
+millet run --compute-type int8 --batch-size 4
 ```
 
-When a preset is set, `--summary-backend` and `--summary-model` overrides
-are honored within that preset (e.g. `--summary-preset confidential
---summary-model deepseek-v3` swaps the model but keeps the TEE backend).
-
-### Two-pass local summarization
-
-When the **ollama** backend is selected (the default), millet runs two
-LLM calls instead of one:
-
-1. **Pass 1 (extraction)** — pulls topics, actions, decisions, and open
-   questions out of the transcript as plain numbered lists, using a
-   context window sized to the full transcript.
-2. **Pass 2 (formatting)** — takes the much smaller extracted data and
-   organizes it into the canonical Markdown structure with a fixed 8K
-   context window.
-
-This dramatically improves format compliance and reduces hallucinations
-on 20B-class local models (`gpt-oss:20b`, `qwen3.6:27b`) compared to a
-single-pass call, at the cost of one additional LLM call (~30–90s extra).
-Cloud backends (claudemax, openrouter, openai) remain single-pass — they
-already produce well-structured output in one shot.
-
-To opt out and use the previous single-pass behavior:
+還是不行就換小模型：
 
 ```bash
-millet run --ollama-singlepass
-# Or via environment:
-export MEETSCRIBE_OLLAMA_SINGLEPASS=1
+millet run --model medium --compute-type int8 --batch-size 4
+millet run --model base --compute-type int8 --batch-size 4
 ```
 
-The `.summary.meta.json` sidecar records per-pass timings
-(`pass1_seconds`, `pass2_seconds`, `pass1_chars`) when two-pass was used.
+### `Alignment model for English is not downloaded`
 
-See [docs/local-model-evaluation.md](docs/local-model-evaluation.md) for
-the full evaluation that motivated this design, including known failure
-modes of local 20B-class models.
-
-### Customizing the prompt
-
-The summarization prompt lives in `meet/prompts/summarize_system.md`. Edit it
-to change the summary format, add domain-specific instructions, or tune for
-your preferred model. No Python changes needed.
-
-## Voiceprint speaker recognition
-
-millet can automatically identify speakers across meetings using voice
-embeddings. After you label speakers in one meeting, their voice profiles are
-stored and matched against future recordings.
+下載英文 alignment：
 
 ```bash
-# Build profiles from already-labeled sessions
-millet enroll ./millet-output/meeting-20260330-*
-
-# Auto-label speakers in future meetings using voice profiles
-millet label --auto ./millet-output/meeting-20260401-093000
+millet download en
 ```
 
-Profiles are stored in `~/.config/meet/speaker_profiles.json` and improve
-with each labeled session (running average of embeddings).
-
-## Meeting sync
-
-Push meeting artifacts to a Git repository on a configurable schedule.
+或跳過 alignment：
 
 ```bash
-# Create an example config
-millet sync --init-config
-# Edit ~/.config/meet/sync_config.json with your repo URL and schedule
-
-# Push a session manually
-millet sync ./millet-output/meeting-20260331-110038_STANDUP
-
-# View configured schedule
-millet sync --list-schedule
+millet run --skip-alignment --compute-type int8 --batch-size 4
 ```
 
-When the GUI detects a matching scheduled meeting, it prompts for confirmation
-before syncing. Sessions that don't match the schedule are skipped. The CLI
-uses `--force` to sync unmatched sessions.
+### `No active speech found in audio`
 
-You can also configure a `team_members` list and `min_team_members` threshold
-in `sync_config.json` to require that a minimum number of recognized speakers
-are present before offering to sync.
-
-## Multilingual support
-
-millet auto-detects the spoken language by default (Whisper large-v3-turbo
-supports 99 languages). You can also set it explicitly:
+通常代表測試錄音太短、沒有人聲、麥克風/系統聲音來源不對。先確認裝置：
 
 ```bash
-millet run --language de       # German
-millet run --language tr       # Turkish
-millet run --language fr       # French
-millet run --language es       # Spanish
-millet run --language fa       # Farsi (Persian)
-millet run --language zh       # Chinese (default via MILLET_LANGUAGE)
-millet run --language auto     # Auto-detect
+millet devices
 ```
 
-### How it works
+## Git 操作
 
-- **Transcription**: The same Whisper model handles all languages -- no extra
-  download or VRAM cost. When set to `auto`, the detected language is used for
-  alignment and all downstream steps.
-- **Speaker diarization**: Completely language-agnostic (based on voice
-  characteristics, not speech content).
-- **AI summary**: When a non-English language is detected, the summary prompt
-  instructs the LLM to write the summary in the same language as the transcript.
-- **PDF output**: Uses DejaVu Sans for full Unicode coverage (Latin, Cyrillic,
-  Greek, Turkish special characters, etc.). Farsi uses Noto Naskh Arabic with
-  RTL text reshaping.
+目前 remote：
 
-### Tested languages
+```text
+origin   https://github.com/jimmy071919/millet.git
+upstream https://github.com/pretyflaco/millet.git
+```
 
-| Language | Code | Alignment model | PDF font | Notes |
-|----------|------|----------------|----------|-------|
-| English  | `en` | wav2vec2 (torchaudio) | DejaVu Sans | |
-| German   | `de` | VoxPopuli (torchaudio) | DejaVu Sans | |
-| French   | `fr` | VoxPopuli (torchaudio) | DejaVu Sans | |
-| Spanish  | `es` | VoxPopuli (torchaudio) | DejaVu Sans | |
-| Turkish  | `tr` | wav2vec2 (HuggingFace) | DejaVu Sans | ~1.2 GB alignment model download |
-| Farsi    | `fa` | wav2vec2 (HuggingFace) | Noto Naskh Arabic | ~1.2 GB alignment model download, RTL |
-
-### Farsi RTL requirements
-
-Farsi uses right-to-left text. For proper PDF rendering, install the optional
-RTL dependencies:
+日常修改後：
 
 ```bash
-pip install arabic-reshaper python-bidi
-# Or with the optional extra:
-pip install "millet-pipeline[rtl]"
+git status
+git add .
+git commit -m "描述這次修改"
+git push
 ```
 
-Without these libraries, Farsi text will appear in the PDF but glyphs may not
-be joined correctly and reading order may be wrong.
-
-## Virtual sink mode
-
-By default, `millet record` captures all system audio (including notification
-sounds, music, etc.). For cleaner recordings, use `--virtual-sink`:
+從原作者同步更新：
 
 ```bash
-millet record --virtual-sink
+git fetch upstream
+git merge upstream/main
 ```
 
-This creates an isolated audio sink. Route your meeting app's audio to it:
+## 授權
 
-1. Open `pavucontrol` (PulseAudio Volume Control)
-2. Go to the "Playback" tab
-3. Find your browser or meeting app
-4. Change its output to "Meet-Capture"
-
-You'll still hear the meeting through your normal speakers via automatic loopback.
-
-## VRAM usage
-
-With an NVIDIA GPU (12 GB VRAM):
-
-| Model | Transcription | + Diarization | Recommended batch_size |
-|-------|--------------|---------------|----------------------|
-| large-v3-turbo | ~4 GB | ~7 GB total | 16 |
-| medium | ~3 GB | ~6 GB total | 16 |
-| base | ~1 GB | ~4 GB total | 16 |
-
-If you hit OOM errors:
-1. Reduce `--batch-size` to 4 or 8
-2. Use `--compute-type int8`
-3. Use a smaller model (`--model medium` or `--model base`)
-4. Use `--device cpu` as a last resort
-
-## How it works
-
-```
-[Meeting App] --> [PipeWire/PulseAudio] --> [ffmpeg dual-channel capture] --> meeting.wav
-                                                                                  |
-                  [WhisperX: faster-whisper + wav2vec2 alignment + pyannote diarization]
-                                                                                  |
-                                      [Ollama LLM summary]     [Diarized transcript]
-                                              |                         |
-                                        .summary.md          .txt / .srt / .json
-                                              |                         |
-                                              +--------> .pdf <---------+
-```
-
-**Capture**: Records your mic (left channel) and system audio (right channel)
-simultaneously into a single stereo WAV file at 16 kHz.
-
-**Transcribe**: Runs the WhisperX pipeline -- batched Whisper transcription,
-wav2vec2 forced alignment for word-level timestamps, and pyannote speaker
-diarization. Dual-channel energy analysis maps speakers to YOU or REMOTE.
-
-**Summarize**: Sends the transcript to a local Ollama model that extracts
-a structured summary.
-
-**PDF**: Combines the summary and full transcript into a professional
-page-numbered PDF document.
-
-## CUDA NVRTC note
-
-The pyannote diarization model requires CUDA NVRTC for JIT compilation. If your
-CUDA driver version doesn't match the installed libnvrtc-builtins version,
-millet automatically creates a compatibility symlink. This happens
-transparently on first use.
-
-If you still see NVRTC errors:
-
-```bash
-export LD_LIBRARY_PATH=$HOME/.local/lib/cuda:$LD_LIBRARY_PATH
-```
-
-## Limitations
-
-- Overlapping speech is not handled well (Whisper limitation)
-- Speaker labels default to role-based (YOU, REMOTE_1, REMOTE_2) — use `millet label` or the GUI dialog to assign real names
-- Diarization accuracy varies with audio quality and number of speakers
-- Audio capture (`millet record`, `millet run`) requires Linux with PulseAudio
-  or PipeWire. Transcription, labeling, summarization, and sync work on both
-  Linux (CUDA) and macOS Apple Silicon (MLX Whisper + MPS) as of v0.6.0.
-- Windows is not supported.
-- Local 20B-class summary models (e.g. `gpt-oss:20b`) can hallucinate on
-  transcripts dominated by very short low-information utterances ("yes",
-  "okay") and may exceed the default 600s timeout on very large
-  (>100 KB) non-English transcripts. For these cases configure a cloud
-  backend (claudemax / openrouter) — the fallback chain takes over
-  automatically. See [docs/local-model-evaluation.md](docs/local-model-evaluation.md).
-
-## FAQ
-
-**Is there a GUI?** Yes — run `millet gui` for a small always-on-top GTK3
-widget with Record/Stop, live timer, status indicator, and one-click
-access to the resulting PDF and session folder. See
-[Launch the GUI widget](#launch-the-gui-widget) for details.
-
-**Does it work on Windows / macOS?** System-audio recording requires Linux
-(PulseAudio / PipeWire). The post-capture pipeline (`millet transcribe`,
-`millet label`, `millet sync`, etc.) works on macOS Apple Silicon as of v0.6.0
-— install with `pip install 'millet-pipeline[mlx]'`. Windows is not
-supported.
-
-**Can I run a Mac as a transcription server?** Yes — see
-[vezir](https://github.com/pretyflaco/vezir), the team-scale wrapper around
-millet. A Mac can act as the GPU server with Linux laptops or the
-[Android client](https://github.com/pretyflaco/vezir-android) providing
-the audio.
-
-**Can I use it without a GPU?** Yes, with `--device cpu`, but
-transcription will be 5–20× slower depending on the Whisper model.
-See [VRAM usage](#vram-usage).
-
-## Contributing
-
-```bash
-git clone https://github.com/pretyflaco/millet
-cd millet
-pip install -e .[dev]
-/usr/bin/python3 -m pytest tests/
-```
-
-Pull requests welcome. Please run the test suite before submitting.
-
-## Changelog
-
-See [CHANGELOG.md](CHANGELOG.md) for release history.
-
-## License
-
-[GPL-3.0](LICENSE)
+原專案使用 GPL-3.0，詳見 [LICENSE](LICENSE)。
