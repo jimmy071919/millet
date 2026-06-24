@@ -72,8 +72,9 @@ def test_sync_config_path_team(monkeypatch, tmp_path):
 def test_recordings_dir_team(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("MEET_RECORDINGS_DIR", raising=False)
-    assert paths.recordings_dir() == tmp_path / "meet-recordings"
-    assert paths.recordings_dir("blink") == tmp_path / "meet-recordings" / "blink"
+    root = Path(paths.__file__).resolve().parent.parent
+    assert paths.recordings_dir() == root / "millet-output"
+    assert paths.recordings_dir("blink") == root / "millet-output" / "blink"
 
 
 def test_recordings_dir_env_override(monkeypatch, tmp_path):

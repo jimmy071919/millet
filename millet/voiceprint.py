@@ -21,7 +21,11 @@ from typing import NamedTuple
 
 import numpy as np
 
+from millet.paths import apply_model_cache_environment, huggingface_hub_dir
+
 log = logging.getLogger(__name__)
+
+apply_model_cache_environment()
 
 
 # ─── Profile path resolution ─────────────────────────────────────────────────
@@ -115,7 +119,7 @@ def _get_inference():
 
     from pyannote.audio import Inference, Model
 
-    hub = Path.home() / ".cache" / "huggingface" / "hub"
+    hub = huggingface_hub_dir()
     candidates = sorted(hub.glob("models--pyannote--speaker-diarization*"))
     if not candidates:
         raise RuntimeError(

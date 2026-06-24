@@ -25,9 +25,11 @@ env/
 # Environment / secrets
 .env
 .env.*
+.millet-models/
 
 # Recordings (large binary files)
 *.wav
+millet-output/
 
 # One-off scripts and generated files
 resummarize_sonnet.py

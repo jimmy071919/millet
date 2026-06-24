@@ -30,6 +30,15 @@ Istanbul's first printing press.  Part of the vezir ecosystem.
 #   /tmp/v/bin/meet download es     # → CERTIFICATE_VERIFY_FAILED on python.org Python
 import os as _os
 
+try:
+    from millet.paths import apply_model_cache_environment as _apply_model_cache_environment
+
+    _apply_model_cache_environment()
+except Exception:
+    # Cache-path setup is a convenience layer. If path resolution ever fails,
+    # leave the underlying libraries to use their own defaults.
+    pass
+
 if "SSL_CERT_FILE" not in _os.environ:
     try:
         import certifi as _certifi

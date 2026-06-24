@@ -23,7 +23,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from millet.paths import (
+    apply_model_cache_environment,
+    huggingface_hub_dir,
+    huggingface_token_path,
+    save_huggingface_token,
+    torch_home,
+)
+
 log = logging.getLogger(__name__)
+
+apply_model_cache_environment()
 
 # Fix for CUDA NVRTC JIT compilation: pyannote's wespeaker embedding model
 # triggers torch.fft.rfft -> CUDA JIT -> NVRTC, which needs libnvrtc-builtins.so
@@ -280,16 +290,14 @@ def check_alignment_model_cached(lang: str) -> bool:
         filename = _TORCHAUDIO_FILENAMES.get(model_name)
         if not filename:
             return True  # Unknown filename — can't check
-        cache_path = Path.home() / ".cache" / "torch" / "hub" / "checkpoints" / filename
+        cache_path = torch_home() / "hub" / "checkpoints" / filename
         return cache_path.exists()
 
     elif model_type == "huggingface":
         # HuggingFace models are stored as models--<org>--<model>/
         # with a snapshots/ subdirectory containing the actual weights.
         safe_name = model_name.replace("/", "--")
-        model_dir = (
-            Path.home() / ".cache" / "huggingface" / "hub" / f"models--{safe_name}"
-        )
+        model_dir = huggingface_hub_dir() / f"models--{safe_name}"
         if not model_dir.exists():
             return False
         # Check that there's at least one snapshot (complete download)
@@ -347,8 +355,12 @@ def download_alignment_model(
         from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor
 
         _status(f"Downloading HuggingFace model {model_name}...")
-        Wav2Vec2Processor.from_pretrained(model_name)
-        Wav2Vec2ForCTC.from_pretrained(model_name)
+        token = None
+        token_path = huggingface_token_path()
+        if token_path.exists():
+            token = token_path.read_text(encoding="utf-8").strip() or None
+        Wav2Vec2Processor.from_pretrained(model_name, token=token)
+        Wav2Vec2ForCTC.from_pretrained(model_name, token=token)
         _status(f"Alignment model for {lang_name} downloaded successfully.")
 
 
@@ -649,13 +661,23 @@ class TranscriptionConfig:
                 elif field_name == "torch_device":
                     self.torch_device = fallback
 
+        supplied_hf_token = self.hf_token
         if self.hf_token is None:
             self.hf_token = os.environ.get("HF_TOKEN")
+            supplied_hf_token = self.hf_token
         if self.hf_token is None:
-            # Try reading from huggingface-cli cache
-            token_path = Path.home() / ".cache" / "huggingface" / "token"
-            if token_path.exists():
-                self.hf_token = token_path.read_text().strip()
+            token_candidates = [
+                huggingface_token_path(),
+                Path.home() / ".cache" / "huggingface" / "token",
+            ]
+            for token_path in token_candidates:
+                if token_path.exists():
+                    token = token_path.read_text(encoding="utf-8").strip()
+                    if token:
+                        self.hf_token = token
+                        break
+        elif supplied_hf_token:
+            save_huggingface_token(supplied_hf_token)
 
 
 @dataclass

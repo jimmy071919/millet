@@ -13,7 +13,14 @@ import click
     default=False,
     help="Download alignment models for all supported languages",
 )
-def download(languages, download_all):
+@click.option(
+    "--hf-token",
+    type=str,
+    default=None,
+    envvar="HF_TOKEN",
+    help="Persist a HuggingFace token for pyannote/transformers downloads",
+)
+def download(languages, download_all, hf_token):
     """Download alignment models for specified languages.
 
     \b
@@ -26,6 +33,11 @@ def download(languages, download_all):
         download_alignment_model,
         get_supported_alignment_languages,
     )
+    if hf_token:
+        from millet.paths import huggingface_token_path, save_huggingface_token
+
+        save_huggingface_token(hf_token)
+        click.echo(f"  HuggingFace token saved to {huggingface_token_path()}")
 
     # Special-case the Parakeet ASR model.  It is not a language alignment
     # model, but `millet download parakeet` is the natural place users look

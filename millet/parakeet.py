@@ -32,10 +32,14 @@ import importlib.util
 import logging
 from typing import TYPE_CHECKING, Any
 
+from millet.paths import apply_model_cache_environment, huggingface_hub_dir
+
 if TYPE_CHECKING:
     import numpy as np
 
 log = logging.getLogger(__name__)
+
+apply_model_cache_environment()
 
 # Default English Parakeet model (onnx-asr name).  The multilingual variant
 # is "nemo-parakeet-tdt-0.6b-v3"; v2 is English-only and our benchmark target.
@@ -254,10 +258,8 @@ def ensure_parakeet_cached(model: str | None = None) -> bool:
     leaves config.json + vocab.txt but zero-byte ``.onnx`` blobs) being
     mistaken for a finished install.
     """
-    from pathlib import Path
-
     _ = model  # model name reserved; we match by the parakeet repo glob below
-    hub = Path.home() / ".cache" / "huggingface" / "hub"
+    hub = huggingface_hub_dir()
     if not hub.is_dir():
         return False
 

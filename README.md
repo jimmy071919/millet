@@ -214,7 +214,7 @@ millet record
 ```
 
 Press Ctrl+C when the meeting ends. A 10-second drain buffer ensures all audio
-is captured. Recordings are saved to `~/millet-recordings/`.
+is captured. Recordings are saved to `./millet-output/`.
 
 Options:
 - `-o /path` -- save recordings elsewhere
@@ -225,7 +225,7 @@ Options:
 ### Transcribe a recording
 
 ```bash
-millet transcribe ~/millet-recordings/meeting-20260312-140000/meeting-20260312-140000.wav
+millet transcribe ./millet-output/meeting-20260312-140000/meeting-20260312-140000.wav
 ```
 
 Options:
@@ -262,7 +262,7 @@ quieter voice.
 Use `--mixdown dual` to transcribe each channel independently:
 
 ```bash
-millet transcribe --mixdown dual ~/millet-recordings/meeting-20260312-140000/
+millet transcribe --mixdown dual ./millet-output/meeting-20260312-140000/
 ```
 
 This skips diarization entirely (channel identity = speaker identity) and
@@ -306,7 +306,7 @@ a **sync confirmation prompt** appears with Push / Skip buttons.
 ### Label speakers after the fact
 
 ```bash
-millet label ~/millet-recordings/meeting-20260313-214133
+millet label ./millet-output/meeting-20260313-214133
 ```
 
 For each speaker in the recording, `millet label`:
@@ -320,7 +320,7 @@ Confident matches are applied without prompting; only unrecognized speakers get
 the interactive prompt:
 
 ```bash
-millet label --auto ~/millet-recordings/meeting-20260313-214133
+millet label --auto ./millet-output/meeting-20260313-214133
 ```
 
 Options:
@@ -334,7 +334,7 @@ Options:
 Each recording gets its own session directory:
 
 ```
-~/millet-recordings/meeting-20260312-140000/
+./millet-output/meeting-20260312-140000/
     meeting-20260312-140000.wav                 # Stereo audio (16kHz)
     meeting-20260312-140000.session.json        # Recording metadata
     meeting-20260312-140000.ffmpeg.log          # ffmpeg capture log
@@ -412,13 +412,13 @@ Re-extract it for one or more sessions with:
 ```bash
 # Re-run the LLM to produce frontmatter; idempotent (skips sessions
 # whose .summary.meta.json already records data_extracted=true).
-millet ingest ~/millet-recordings/meeting-2026*
+millet ingest ./millet-output/meeting-2026*
 
 # Force re-extraction even when frontmatter is already present:
-millet ingest --force ~/millet-recordings/meeting-20260312-140000
+millet ingest --force ./millet-output/meeting-20260312-140000
 
 # Preview without invoking the LLM:
-millet ingest --dry-run ~/millet-recordings/meeting-2026*
+millet ingest --dry-run ./millet-output/meeting-2026*
 ```
 
 `millet ingest` accepts the same `--summary-backend` /
@@ -519,7 +519,7 @@ pair.  Set it via `--summary-preset` on `transcribe`, `run`, `label`,
 
 ```bash
 # Quick check of which preset is in effect
-millet transcribe ~/millet-recordings/today/today.wav --summary-preset confidential
+millet transcribe ./millet-output/today/today.wav --summary-preset confidential
 
 # Or set per-session via env
 export MEETSCRIBE_SUMMARY_PRESET=high-quality
@@ -577,10 +577,10 @@ stored and matched against future recordings.
 
 ```bash
 # Build profiles from already-labeled sessions
-millet enroll ~/millet-recordings/meeting-20260330-*
+millet enroll ./millet-output/meeting-20260330-*
 
 # Auto-label speakers in future meetings using voice profiles
-millet label --auto ~/millet-recordings/meeting-20260401-093000
+millet label --auto ./millet-output/meeting-20260401-093000
 ```
 
 Profiles are stored in `~/.config/meet/speaker_profiles.json` and improve
@@ -596,7 +596,7 @@ millet sync --init-config
 # Edit ~/.config/meet/sync_config.json with your repo URL and schedule
 
 # Push a session manually
-millet sync ~/millet-recordings/meeting-20260331-110038_STANDUP
+millet sync ./millet-output/meeting-20260331-110038_STANDUP
 
 # View configured schedule
 millet sync --list-schedule

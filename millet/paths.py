@@ -1,7 +1,7 @@
 """Central path resolution for millet (a.k.a. meetscribe).
 
 Historically every module hardcoded its own ``~/.config/meet/...`` and
-``~/meet-recordings`` constants.  This module consolidates that logic in
+recordings-directory constants.  This module consolidates that logic in
 one place and adds an optional ``team`` dimension so a scribe recording
 for multiple teams can keep voiceprints, sync config, and recordings
 separated locally.
@@ -10,13 +10,13 @@ Team-aware layout (when ``team`` is given)::
 
     ~/.config/meet/<team>/speaker_profiles.json
     ~/.config/meet/<team>/sync_config.json
-    ~/meet-recordings/<team>/
+    <project>/millet-output/<team>/
 
 Global layout (when ``team`` is None — unchanged, back-compatible)::
 
     ~/.config/meet/speaker_profiles.json
     ~/.config/meet/sync_config.json
-    ~/meet-recordings/
+    <project>/millet-output/
 
 Resolution is evaluated at call time (not import time) so callers that
 override ``$HOME`` or the env vars between import and use get the right
@@ -32,7 +32,7 @@ back-compat):
 * ``MEET_CONFIG_DIR`` — root of the config tree (default
   ``~/.config/meet``).
 * ``MEET_RECORDINGS_DIR`` — root of the recordings tree (default
-  ``~/meet-recordings``).
+  ``<project>/millet-output``).
 """
 
 from __future__ import annotations
@@ -88,6 +88,8 @@ _TEAM_SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{2,31}$")
 
 _PROFILES_FILENAME = "speaker_profiles.json"
 _SYNC_FILENAME = "sync_config.json"
+_MODEL_CACHE_DIRNAME = ".millet-models"
+_OUTPUT_DIRNAME = "millet-output"
 
 
 def _validate_team(team: str | None) -> str | None:
@@ -143,10 +145,84 @@ def sync_config_path(team: str | None = None) -> Path:
 def recordings_dir(team: str | None = None) -> Path:
     """Root recordings directory, optionally scoped to a team.
 
-    ``~/meet-recordings`` (or ``$MEET_RECORDINGS_DIR``), plus ``/<team>``
-    when a team is given.
+    ``<project>/millet-output`` (or ``$MILLET_RECORDINGS_DIR``), plus
+    ``/<team>`` when a team is given.
     """
     team = _validate_team(team)
     root = getenv_renamed("MILLET_RECORDINGS_DIR", "MEET_RECORDINGS_DIR", default="")
-    base = Path(root).expanduser() if root else Path.home() / "meet-recordings"
+    base = Path(root).expanduser() if root else project_root() / _OUTPUT_DIRNAME
     return base / team if team else base
+
+
+def project_root() -> Path:
+    """Return the source/project root that contains the ``millet`` package."""
+    return Path(__file__).resolve().parent.parent
+
+
+def model_cache_dir() -> Path:
+    """Root directory for persistent local model caches.
+
+    ``MILLET_MODEL_CACHE_DIR`` lets operators place model weights on a
+    large/shared disk.  When unset, source installs keep the cache inside the
+    project checkout so repeated runs do not redownload Hugging Face /
+    transformers / torch assets into ephemeral home directories.
+    """
+    root = getenv_renamed(
+        "MILLET_MODEL_CACHE_DIR",
+        "MEETSCRIBE_MODEL_CACHE_DIR",
+        default="",
+    )
+    return Path(root).expanduser() if root else project_root() / _MODEL_CACHE_DIRNAME
+
+
+def huggingface_home() -> Path:
+    """Persistent Hugging Face home used by millet when HF_HOME is unset."""
+    return Path(os.environ.get("HF_HOME", model_cache_dir() / "huggingface")).expanduser()
+
+
+def huggingface_hub_dir() -> Path:
+    """Persistent Hugging Face hub cache directory."""
+    return Path(
+        os.environ.get("HF_HUB_CACHE", huggingface_home() / "hub")
+    ).expanduser()
+
+
+def huggingface_token_path() -> Path:
+    """Project-local Hugging Face token file.
+
+    The file is intentionally outside ``~/.cache`` so a source checkout can be
+    self-contained for offline-ish repeated use after the first authorized
+    download.
+    """
+    return huggingface_home() / "token"
+
+
+def save_huggingface_token(token: str) -> Path:
+    """Persist a Hugging Face token in millet's local model cache."""
+    token_path = huggingface_token_path()
+    token_path.parent.mkdir(parents=True, exist_ok=True)
+    token_path.write_text(token.strip() + "\n", encoding="utf-8")
+    try:
+        token_path.chmod(0o600)
+    except OSError:
+        pass
+    return token_path
+
+
+def torch_home() -> Path:
+    """Persistent torch/torchaudio cache root used by alignment downloads."""
+    return Path(os.environ.get("TORCH_HOME", model_cache_dir() / "torch")).expanduser()
+
+
+def apply_model_cache_environment() -> None:
+    """Point model-download libraries at millet's persistent cache.
+
+    Called early by importable modules before Hugging Face / transformers /
+    torchaudio are imported.  User-provided env vars always win.
+    """
+    hf_home = huggingface_home()
+    os.environ.setdefault("HF_HOME", str(hf_home))
+    os.environ.setdefault("HF_HUB_CACHE", str(huggingface_hub_dir()))
+    os.environ.setdefault("HUGGINGFACE_HUB_CACHE", os.environ["HF_HUB_CACHE"])
+    os.environ.setdefault("TRANSFORMERS_CACHE", str(hf_home / "transformers"))
+    os.environ.setdefault("TORCH_HOME", str(torch_home()))
