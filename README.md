@@ -106,8 +106,10 @@ including browser-based meetings and standalone desktop clients.
 # Install from PyPI
 pip install millet-pipeline
 
-# Set your HuggingFace token (required for speaker diarization)
-export HF_TOKEN=hf_your_token_here
+# Save your HuggingFace token once (required for speaker diarization)
+mkdir -p .millet-models/huggingface
+printf '%s\n' 'hf_your_token_here' > .millet-models/huggingface/token
+chmod 600 .millet-models/huggingface/token
 
 # Record a meeting, then auto-transcribe + summarize when you stop
 millet run
@@ -175,12 +177,26 @@ the `tinfoil` Python SDK (≈ 2 MB).  Set `TINFOIL_API_KEY` to use the
 1. Create a free account at https://huggingface.co
 2. Accept the model terms at https://huggingface.co/pyannote/speaker-diarization-community-1
 3. Create a read token at https://huggingface.co/settings/tokens
-4. Set it:
+4. Save it once into this checkout's persistent model cache:
 
 ```bash
-export HF_TOKEN=hf_your_token_here
-# Add to ~/.bashrc for persistence:
-echo 'export HF_TOKEN=hf_your_token_here' >> ~/.bashrc
+mkdir -p .millet-models/huggingface
+printf '%s\n' 'hf_your_token_here' > .millet-models/huggingface/token
+chmod 600 .millet-models/huggingface/token
+```
+
+By default millet reads this token from `.millet-models/huggingface/token` and
+stores Hugging Face / transformers / torch model caches under `.millet-models/`
+in this project checkout.  That directory is git-ignored.
+
+You may also pass `--hf-token` to `millet run` or `millet transcribe`; when a
+token is provided that way, millet saves it to the local token file for future
+runs.
+
+To put the cache somewhere else, set:
+
+```bash
+export MILLET_MODEL_CACHE_DIR=/path/to/persistent/millet-models
 ```
 
 ### 4. Ollama (optional, for AI summaries)
