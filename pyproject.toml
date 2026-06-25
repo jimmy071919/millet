@@ -65,6 +65,7 @@ label = "millet.cli:label"
 enroll = "millet.cli:enroll"
 sync = "millet.cli:sync"
 gui = "millet.cli:gui"
+webui = "millet.cli:webui"
 ingest = "millet.cli:ingest"
 
 [project.entry-points."meet.subcommands"]
@@ -76,6 +77,7 @@ label = "millet.cli:label"
 enroll = "millet.cli:enroll"
 sync = "millet.cli:sync"
 gui = "millet.cli:gui"
+webui = "millet.cli:webui"
 ingest = "millet.cli:ingest"
 
 [project.urls]
